@@ -44,7 +44,8 @@ export function useVoice() {
         throw new Error(err);
       }
 
-      const { token, url, room: roomName } = await res.json();
+      const json = await res.json();
+      const { token, url, room: roomName, iceServers } = json as any;
 
       const room = new Room();
       roomRef.current = room;
@@ -60,13 +61,18 @@ export function useVoice() {
         );
       };
 
-      room
-        .on("participantConnected", updateCount)
-        .on("participantDisconnected", updateCount)
-        .on("disconnected", () => {
-          roomRef.current = null;
-          setState({ status: "idle" });
-        });
+      room.on("disconnected", (reason) => {
+        console.log("LiveKit disconnected:", reason);
+      });
+      room.on("reconnecting", () => console.log("LiveKit reconnecting..."));
+      room.on("reconnected", () => console.log("LiveKit reconnected"));
+      // room
+      //   .on("participantConnected", updateCount)
+      //   .on("participantDisconnected", updateCount)
+      //   .on("disconnected", () => {
+      //     roomRef.current = null;
+      //     setState({ status: "idle" });
+      //   });
 
       room.on("trackSubscribed", (track, publication, participant) => {
         if (track.kind === "audio") {
@@ -76,7 +82,7 @@ export function useVoice() {
         }
       });
 
-      await room.connect(url, token);
+      await room.connect(url, token, { rtcConfig: { iceServers: iceServers ?? [{ urls: 'stun:stun.l.google.com:19302' }] } });
       
       room.on("trackSubscribed", (track) => {
         if (track.kind === "audio") {
