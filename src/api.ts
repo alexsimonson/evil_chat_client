@@ -56,6 +56,29 @@ export const api = {
     );
   },
 
+  // Voice participants - available to all members without being connected
+  getVoiceParticipants: (serverId: number) =>
+    apiFetch<{
+      channels: Array<{
+        id: number;
+        name: string;
+        livekitRoomName: string | null;
+        participants: Array<{ id: string; username: string; displayName: string | null }>;
+      }>;
+    }>(`/channels/voice/participants/${serverId}`),
+
+  // Voice session tracking
+  startVoiceSession: (channelId: number) =>
+    apiFetch<{ sessionId: number }>("/livekit/session/start", {
+      method: "POST",
+      body: JSON.stringify({ channelId }),
+    }),
+  endVoiceSession: (channelId: number) =>
+    apiFetch<{ success: boolean }>("/livekit/session/end", {
+      method: "POST",
+      body: JSON.stringify({ channelId }),
+    }),
+
   // Optional: REST send message (temporary, until WS)
   sendMessage: (channelId: number, content: string) =>
     apiFetch<{ messageId: number }>(`/channels/${channelId}/messages`, {

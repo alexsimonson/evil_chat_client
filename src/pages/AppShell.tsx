@@ -4,9 +4,11 @@ import { useAuth } from "../auth/AuthProvider";
 import type { Server, Channel, Message } from "../types";
 import { ServerList } from "../components/ServerList";
 import { ChannelList } from "../components/ChannelList";
+import { VoiceChannelList } from "../components/VoiceChannelList";
 import { MessageList } from "../components/MessageList";
 import { MessageComposer } from "../components/MessageComposer";
 import { useVoice } from "../voice/useVoice";
+import { useVoiceParticipants } from "../voice/useVoiceParticipants";
 
 
 export function AppShell() {
@@ -19,6 +21,8 @@ export function AppShell() {
 
   const [activeServerId, setActiveServerId] = useState<number | null>(null);
   const [activeChannelId, setActiveChannelId] = useState<number | null>(null);
+
+  const voiceParticipants = useVoiceParticipants(activeServerId);
 
   const activeChannel = useMemo(
     () => channels.find((c) => c.id === activeChannelId) ?? null,
@@ -88,6 +92,17 @@ export function AppShell() {
           activeChannelId={activeChannelId}
           onSelect={setActiveChannelId}
         />
+
+        <h3 style={{ marginTop: 24 }}>Voice Channels</h3>
+        {voiceParticipants.state.status === "loading" && <div style={{ fontSize: 12, color: "#666" }}>Loading...</div>}
+        {voiceParticipants.state.status === "error" && <div style={{ fontSize: 12, color: "crimson" }}>Error loading voice channels</div>}
+        {voiceParticipants.state.status === "ready" && (
+          <VoiceChannelList
+            channels={voiceParticipants.state.channels}
+            activeChannelId={activeChannelId}
+            onSelect={setActiveChannelId}
+          />
+        )}
         {activeChannel?.type === "voice" && (
   <div style={{ marginTop: 12, padding: 10, border: "1px dashed #aaa" }}>
     <div style={{ fontWeight: 600, marginBottom: 8 }}>Voice</div>

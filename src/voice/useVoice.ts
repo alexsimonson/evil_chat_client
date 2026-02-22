@@ -1,24 +1,37 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Room } from "livekit-client";
+import { api } from "../api";
 
 const API_URL = import.meta.env.VITE_API_URL as string;
 
 type VoiceState =
   | { status: "idle" }
   | { status: "connecting" }
-  | { status: "connected"; roomName: string; muted: boolean; participants: number }
+  | { status: "connected"; roomName: string; channelId: number; muted: boolean; participants: number }
   | { status: "error"; message: string };
 
 export function useVoice() {
   const roomRef = useRef<Room | null>(null);
   const [state, setState] = useState<VoiceState>({ status: "idle" });
+  const currentChannelIdRef = useRef<number | null>(null);
 
   const leave = useCallback(() => {
     const room = roomRef.current;
+    const channelId = currentChannelIdRef.current;
+    
     if (room) {
       room.disconnect();
       roomRef.current = null;
     }
+
+    // Track session end
+    if (channelId) {
+      api.endVoiceSession(channelId).catch((e) => {
+        console.error("Failed to end voice session:", e);
+      });
+    }
+
+    currentChannelIdRef.current = null;
     setState({ status: "idle" });
   }, []);
 
@@ -47,43 +60,19 @@ export function useVoice() {
       const json = await res.json();
       const { token, url, room: roomName, iceServers } = json as any;
 
+      // Track session start
+      await api.startVoiceSession(channelId);
+      currentChannelIdRef.current = channelId;
+
       const room = new Room();
       roomRef.current = room;
-
-      // Keep a simple participant count
-      const updateCount = () => {
-        const participants = 1 + room.remoteParticipants.size; // local + remote
-        const muted = room.localParticipant.isMicrophoneEnabled === false;
-        setState((prev) =>
-          prev.status === "connected"
-            ? { ...prev, participants, muted }
-            : prev
-        );
-      };
 
       room.on("disconnected", (reason) => {
         console.log("LiveKit disconnected:", reason);
       });
       room.on("reconnecting", () => console.log("LiveKit reconnecting..."));
       room.on("reconnected", () => console.log("LiveKit reconnected"));
-      // room
-      //   .on("participantConnected", updateCount)
-      //   .on("participantDisconnected", updateCount)
-      //   .on("disconnected", () => {
-      //     roomRef.current = null;
-      //     setState({ status: "idle" });
-      //   });
 
-      room.on("trackSubscribed", (track, publication, participant) => {
-        if (track.kind === "audio") {
-          const audioEl = track.attach();
-          audioEl.autoplay = true;
-          document.body.appendChild(audioEl);
-        }
-      });
-
-      await room.connect(url, token, { rtcConfig: { iceServers: iceServers ?? [{ urls: 'stun:stun.l.google.com:19302' }] } });
-      
       room.on("trackSubscribed", (track) => {
         if (track.kind === "audio") {
           const audio = track.attach();
@@ -93,17 +82,21 @@ export function useVoice() {
         }
       });
 
+      await room.connect(url, token, { rtcConfig: { iceServers: iceServers ?? [{ urls: 'stun:stun.l.google.com:19302' }] } });
+
       await room.localParticipant.setMicrophoneEnabled(true);
 
       setState({
         status: "connected",
         roomName,
+        channelId,
         muted: false,
         participants: 1 + room.remoteParticipants.size,
       });
     } catch (e: any) {
       roomRef.current?.disconnect();
       roomRef.current = null;
+      currentChannelIdRef.current = null;
       setState({ status: "error", message: e?.message ?? "VOICE_ERROR" });
     }
   }, [leave]);
