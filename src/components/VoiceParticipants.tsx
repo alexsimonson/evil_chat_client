@@ -21,11 +21,22 @@ type VoiceController = {
 	leave: () => void;
 	toggleMute: () => Promise<void>;
 	toggleCamera: () => Promise<void>;
+	toggleCameraFacing: () => Promise<void>;
 	toggleScreenShare: () => Promise<void>;
 	videoTracks: VideoTrackEntry[];
 };
 
-function VideoTile({ track, label, isLocal }: { track: VideoTrackEntry; label: string; isLocal: boolean }) {
+function VideoTile({
+	track,
+	label,
+	isLocal,
+	isSingle,
+}: {
+	track: VideoTrackEntry;
+	label: string;
+	isLocal: boolean;
+	isSingle: boolean;
+}) {
 	const videoRef = useRef<HTMLVideoElement | null>(null);
 
 	useEffect(() => {
@@ -46,9 +57,10 @@ function VideoTile({ track, label, isLocal }: { track: VideoTrackEntry; label: s
 				borderRadius: 10,
 				overflow: "hidden",
 				background: "#111",
-				minHeight: 160,
-				paddingBottom: "100%",
-				aspectRatio: "1 / 1",
+				minHeight: isSingle ? "100%" : 160,
+				height: isSingle ? "100%" : "auto",
+				paddingBottom: isSingle ? 0 : "100%",
+				aspectRatio: isSingle ? "16 / 9" : "1 / 1",
 				width: "100%",
 			}}
 		>
@@ -61,7 +73,7 @@ function VideoTile({ track, label, isLocal }: { track: VideoTrackEntry; label: s
 					left: 0,
 					width: "100%",
 					height: "100%",
-					objectFit: "cover",
+					objectFit: isSingle ? "contain" : "cover",
 				}}
 			/>
 			<div
@@ -99,6 +111,7 @@ export function VoiceParticipants({
 	onLeaveVoice: () => Promise<void>;
 }) {
 	const isVoiceChannel = activeChannel?.type === "voice";
+	const isSingleTrack = voice.videoTracks.length === 1;
 
 	const trackTiles = useMemo(() => {
 		return voice.videoTracks.map((track) => {
@@ -110,10 +123,11 @@ export function VoiceParticipants({
 					track={track}
 					isLocal={track.isLocal}
 					label={label}
+					isSingle={isSingleTrack}
 				/>
 			);
 		});
-	}, [voice.videoTracks]);
+	}, [voice.videoTracks, isSingleTrack]);
 
 	if (!isVoiceChannel) {
 		return (
@@ -161,6 +175,14 @@ export function VoiceParticipants({
 							>
 								{voice.state.cameraEnabled ? "Stop Cam" : "Camera"}
 							</button>
+							{voice.state.cameraEnabled && (
+								<button
+									onClick={() => voice.toggleCameraFacing().catch(console.error)}
+									style={{ minHeight: "36px", padding: "6px 12px", fontSize: "0.9rem" }}
+								>
+									Flip Cam
+								</button>
+							)}
 							<button
 								onClick={() => voice.toggleScreenShare().catch(console.error)}
 								style={{ minHeight: "36px", padding: "6px 12px", fontSize: "0.9rem" }}
@@ -197,8 +219,10 @@ export function VoiceParticipants({
 					<div
 						style={{
 							display: "grid",
-							gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-							gap: 12,
+							gridTemplateColumns: isSingleTrack ? "1fr" : "repeat(auto-fit, minmax(180px, 1fr))",
+							gap: isSingleTrack ? 0 : 12,
+							height: isSingleTrack ? "100%" : "auto",
+							minHeight: 0,
 						}}
 					>
 						{trackTiles}

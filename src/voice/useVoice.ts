@@ -13,6 +13,7 @@ type VoiceState =
       muted: boolean;
       cameraEnabled: boolean;
       screenShareEnabled: boolean;
+      cameraFacing: "user" | "environment";
     }
   | { status: "error"; message: string };
 
@@ -210,6 +211,7 @@ export function useVoice() {
         muted: false,
         cameraEnabled: false,
         screenShareEnabled: false,
+        cameraFacing: "user",
       });
     } catch (e: any) {
       roomRef.current?.disconnect();
@@ -257,6 +259,28 @@ export function useVoice() {
     );
   }, []);
 
+  const toggleCameraFacing = useCallback(async () => {
+    const room = roomRef.current;
+    if (!room) return;
+
+    const nextFacing =
+      state.status === "connected" && state.cameraFacing === "environment"
+        ? "user"
+        : "environment";
+
+    const pub = room.localParticipant.getTrackPublication(Track.Source.Camera);
+    const track = pub?.track as any;
+    if (track && typeof track.restartTrack === "function") {
+      await track.restartTrack({ facingMode: nextFacing });
+    }
+
+    setState((prev) =>
+      prev.status === "connected"
+        ? { ...prev, cameraFacing: nextFacing }
+        : prev
+    );
+  }, [state]);
+
   const toggleScreenShare = useCallback(async () => {
     const room = roomRef.current;
     if (!room) return;
@@ -301,6 +325,7 @@ export function useVoice() {
     leave,
     toggleMute,
     toggleCamera,
+    toggleCameraFacing,
     toggleScreenShare,
     videoTracks: sortedVideoTracks,
   };
