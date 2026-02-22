@@ -23,6 +23,7 @@ export type VideoTrackEntry = {
   source: string;
   isLocal: boolean;
   track: Track;
+  enabled: boolean;
 };
 
 export function useVoice() {
@@ -104,6 +105,7 @@ export function useVoice() {
               source,
               isLocal,
               track,
+              enabled: true,
             },
           ];
         });
@@ -125,10 +127,44 @@ export function useVoice() {
 
         const source = String(publication?.source ?? (track as any).source ?? "camera");
         const trackId = String(publication?.trackSid ?? (track as any).sid ?? "remote");
-        addVideoTrack(track, participant, source, false, trackId);
+        
+        // Check if track is already muted when subscribing
+        const isTrackMuted = (track as any).isMuted === true;
+        
+        setVideoTracks((prev) => {
+          // Don't add muted remote tracks
+          if (!prev.some((t) => t.track === track || t.id === trackId)) {
+            return [
+              ...prev,
+              {
+                id: trackId,
+                participantId: participant.identity,
+                participantName: participant.name || participant.identity,
+                source,
+                isLocal: false,
+                track,
+                enabled: !isTrackMuted,
+              },
+            ];
+          }
+          return prev;
+        });
+
+        // Listen for mute/unmute on remote tracks
+        (track as any).on?.("muted", () => {
+          setVideoTracks((prev) =>
+            prev.map((t) => (t.track === track ? { ...t, enabled: false } : t))
+          );
+        });
+
+        (track as any).on?.("unmuted", () => {
+          setVideoTracks((prev) =>
+            prev.map((t) => (t.track === track ? { ...t, enabled: true } : t))
+          );
+        });
       });
 
-      room.on("trackUnsubscribed", (track) => {
+      room.on("trackUnsubscribed", (track, publication) => {
         removeVideoTrack(track);
       });
 
@@ -138,6 +174,19 @@ export function useVoice() {
         const source = String(publication.source ?? (track as any).source ?? "camera");
         const trackId = String(publication.trackSid ?? (track as any).sid ?? "local");
         addVideoTrack(track, participant, source, true, trackId);
+
+        // Listen for mute/unmute on local tracks too (in case they mute from elsewhere)
+        (track as any).on?.("muted", () => {
+          setVideoTracks((prev) =>
+            prev.map((t) => (t.track === track ? { ...t, enabled: false } : t))
+          );
+        });
+
+        (track as any).on?.("unmuted", () => {
+          setVideoTracks((prev) =>
+            prev.map((t) => (t.track === track ? { ...t, enabled: true } : t))
+          );
+        });
       });
 
       room.on("localTrackUnpublished", (publication) => {
@@ -192,6 +241,15 @@ export function useVoice() {
     const enabled = room.localParticipant.isCameraEnabled;
     await room.localParticipant.setCameraEnabled(!enabled);
 
+    // Update enabled state for camera tracks
+    setVideoTracks((prev) =>
+      prev.map((t) =>
+        t.isLocal && t.source.toLowerCase().includes("camera")
+          ? { ...t, enabled: !enabled }
+          : t
+      )
+    );
+
     setState((prev) =>
       prev.status === "connected"
         ? { ...prev, cameraEnabled: !enabled }
@@ -206,6 +264,15 @@ export function useVoice() {
     const enabled = room.localParticipant.isScreenShareEnabled;
     await room.localParticipant.setScreenShareEnabled(!enabled);
 
+    // Update enabled state for screen share tracks
+    setVideoTracks((prev) =>
+      prev.map((t) =>
+        t.isLocal && t.source.toLowerCase().includes("screen")
+          ? { ...t, enabled: !enabled }
+          : t
+      )
+    );
+
     setState((prev) =>
       prev.status === "connected"
         ? { ...prev, screenShareEnabled: !enabled }
@@ -214,13 +281,15 @@ export function useVoice() {
   }, []);
 
   const sortedVideoTracks = useMemo(() => {
-    return [...videoTracks].sort((a, b) => {
-      if (a.isLocal !== b.isLocal) return a.isLocal ? -1 : 1;
-      if (a.participantName !== b.participantName) {
-        return a.participantName.localeCompare(b.participantName);
-      }
-      return a.source.localeCompare(b.source);
-    });
+    return [...videoTracks]
+      .filter((t) => t.enabled)
+      .sort((a, b) => {
+        if (a.isLocal !== b.isLocal) return a.isLocal ? -1 : 1;
+        if (a.participantName !== b.participantName) {
+          return a.participantName.localeCompare(b.participantName);
+        }
+        return a.source.localeCompare(b.source);
+      });
   }, [videoTracks]);
 
   // Cleanup on unmount
