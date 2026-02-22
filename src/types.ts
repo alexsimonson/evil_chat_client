@@ -12,6 +12,13 @@ export type Server = {
   createdAt: string;
 };
 
+export type Member = {
+  id: string;
+  username: string;
+  displayName: string | null;
+  online: boolean;
+};
+
 export type ChannelType = "text" | "voice";
 
 export type Channel = {

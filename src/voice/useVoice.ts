@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Room } from "livekit-client";
-import { api } from "../api";
 
 const API_URL = import.meta.env.VITE_API_URL as string;
 
 type VoiceState =
   | { status: "idle" }
   | { status: "connecting" }
-  | { status: "connected"; roomName: string; channelId: number; muted: boolean; participants: number }
+  | { status: "connected"; roomName: string; channelId: number; muted: boolean }
   | { status: "error"; message: string };
 
 export function useVoice() {
@@ -17,18 +16,10 @@ export function useVoice() {
 
   const leave = useCallback(() => {
     const room = roomRef.current;
-    const channelId = currentChannelIdRef.current;
     
     if (room) {
       room.disconnect();
       roomRef.current = null;
-    }
-
-    // Track session end
-    if (channelId) {
-      api.endVoiceSession(channelId).catch((e) => {
-        console.error("Failed to end voice session:", e);
-      });
     }
 
     currentChannelIdRef.current = null;
@@ -60,8 +51,6 @@ export function useVoice() {
       const json = await res.json();
       const { token, url, room: roomName, iceServers } = json as any;
 
-      // Track session start
-      await api.startVoiceSession(channelId);
       currentChannelIdRef.current = channelId;
 
       const room = new Room();
@@ -91,7 +80,6 @@ export function useVoice() {
         roomName,
         channelId,
         muted: false,
-        participants: 1 + room.remoteParticipants.size,
       });
     } catch (e: any) {
       roomRef.current?.disconnect();
@@ -108,10 +96,9 @@ export function useVoice() {
     const enabled = room.localParticipant.isMicrophoneEnabled;
     await room.localParticipant.setMicrophoneEnabled(!enabled);
 
-    const participants = 1 + room.remoteParticipants.size;
     setState((prev) =>
       prev.status === "connected"
-        ? { ...prev, muted: enabled, participants }
+        ? { ...prev, muted: enabled }
         : prev
     );
   }, []);

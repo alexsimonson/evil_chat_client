@@ -1,4 +1,4 @@
-import type { User, Server, Channel, Message } from "./types";
+import type { User, Server, Channel, Message, Member } from "./types";
 
 const API_URL = import.meta.env.VITE_API_URL as string;
 
@@ -48,6 +48,8 @@ export const api = {
   listServers: () => apiFetch<{ servers: Server[] }>("/servers"),
   listChannels: (serverId: number) =>
     apiFetch<{ channels: Channel[] }>(`/servers/${serverId}/channels`),
+  listServerMembers: (serverId: number) =>
+    apiFetch<{ members: Member[] }>(`/servers/${serverId}/members`),
   listMessages: (channelId: number, limit = 50, before?: number) => {
     const qs = new URLSearchParams({ limit: String(limit) });
     if (before) qs.set("before", String(before));
