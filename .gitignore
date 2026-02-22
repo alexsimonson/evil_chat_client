@@ -53,3 +53,8 @@ Thumbs.db
 *.log
 *.tmp
 *.swp
+
+# TLS certs
+certs/
+*.pem
+*.key

@@ -1,5 +1,6 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import fs from "fs";
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -8,6 +9,10 @@ export default defineConfig({
     port: 3002,
     strictPort: true, // fail instead of auto-switching
     host: true,
+    https: {
+      key: fs.readFileSync("./certs/key.pem"),
+      cert: fs.readFileSync("./certs/cert.pem"),
+    },
     proxy: {
       // Proxy API-related requests to the backend so the browser sees same-origin
       '/auth': {
