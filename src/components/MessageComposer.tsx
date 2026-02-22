@@ -17,12 +17,26 @@ export function MessageComposer({ onSend }: { onSend: (content: string) => Promi
   }
 
   return (
-    <div style={{ padding: 12, borderTop: "1px solid #ddd", display: "flex", gap: 8 }}>
+    <div style={{
+      padding: 12,
+      borderTop: "1px solid #ddd",
+      display: "flex",
+      gap: 8,
+      alignItems: "flex-end",
+      backgroundColor: "inherit",
+      minHeight: "52px",
+    }}>
       <input
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder="Message..."
-        style={{ flex: 1, padding: 10 }}
+        style={{
+          flex: 1,
+          padding: 10,
+          minHeight: "40px",
+          resize: "none",
+          fontFamily: "system-ui",
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
@@ -30,9 +44,35 @@ export function MessageComposer({ onSend }: { onSend: (content: string) => Promi
           }
         }}
       />
-      <button disabled={busy} onClick={() => submit().catch(console.error)} style={{ padding: "10px 14px" }}>
+      <button
+        disabled={busy}
+        onClick={() => submit().catch(console.error)}
+        style={{
+          padding: "10px 14px",
+          whiteSpace: "nowrap",
+          minHeight: "40px",
+          minWidth: "40px",
+        }}
+      >
         Send
       </button>
+
+      <style>{`
+        @media (max-width: 480px) {
+          div {
+            padding: 8px;
+            gap: 6px;
+          }
+          input {
+            padding: 8px;
+            font-size: 16px;
+          }
+          button {
+            padding: 8px 12px;
+            font-size: 0.9rem;
+          }
+        }
+      `}</style>
     </div>
   );
 }

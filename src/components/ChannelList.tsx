@@ -20,7 +20,12 @@ export function ChannelList({
             padding: 8,
             border: "1px solid #ccc",
             background: c.id === activeChannelId ? "#eee" : "white",
+            minHeight: "32px",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
           }}
+          title={c.name}
         >
           {c.type === "text" ? "# " : "🔊 "}
           {c.name}

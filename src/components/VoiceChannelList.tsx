@@ -28,13 +28,18 @@ export function VoiceChannelList({
             borderRadius: 4,
             background: channel.id === activeChannelId ? "#f0f0f0" : "white",
             cursor: "pointer",
+            minHeight: "44px",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            minWidth: 0,
           }}
           onClick={() => onSelect(channel.id)}
         >
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>
+          <div style={{ fontWeight: 600, marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             🔊 {channel.name}
           </div>
-          <div style={{ fontSize: 12, color: "#666" }}>
+          <div style={{ fontSize: 12, color: "#666", overflow: "auto", maxHeight: "100px" }}>
             {channel.participants.length === 0 ? (
               <div>No one connected</div>
             ) : (
@@ -51,6 +56,9 @@ export function VoiceChannelList({
                         background: "#f5f5f5",
                         borderRadius: 3,
                         fontSize: 11,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
                       }}
                     >
                       • {participant.displayName || participant.username}

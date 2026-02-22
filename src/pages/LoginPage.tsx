@@ -22,38 +22,83 @@ export function LoginPage() {
   }
 
   return (
-    <div style={{ maxWidth: 420, margin: "80px auto", fontFamily: "system-ui" }}>
-      <h1>evil_chat_dev</h1>
-      <p style={{ opacity: 0.8 }}>Login to test the MVP.</p>
+    <div style={{
+      minHeight: "100vh",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: "20px",
+      backgroundColor: "inherit",
+    }}>
+      <div style={{
+        width: "100%",
+        maxWidth: "420px",
+        fontFamily: "system-ui",
+      }}>
+        <h1 style={{ textAlign: "center", margin: "0 0 8px 0" }}>evil_chat_dev</h1>
+        <p style={{ opacity: 0.8, textAlign: "center", marginBottom: "32px" }}>
+          Login to test the MVP.
+        </p>
 
-      <form onSubmit={onSubmit} style={{ display: "grid", gap: 10 }}>
-        <label>
-          Email
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={{ width: "100%", padding: 8 }}
-            autoComplete="email"
-          />
-        </label>
+        <form onSubmit={onSubmit} style={{ display: "grid", gap: 16 }}>
+          <div>
+            <label style={{ marginBottom: "6px", fontWeight: 500 }}>
+              Email
+            </label>
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+            />
+          </div>
 
-        <label>
-          Password
-          <input
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={{ width: "100%", padding: 8 }}
-            type="password"
-            autoComplete="current-password"
-          />
-        </label>
+          <div>
+            <label style={{ marginBottom: "6px", fontWeight: 500 }}>
+              Password
+            </label>
+            <input
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              type="password"
+              autoComplete="current-password"
+            />
+          </div>
 
-        {err && <div style={{ color: "crimson" }}>{err}</div>}
+          {err && (
+            <div style={{
+              color: "crimson",
+              padding: "12px",
+              backgroundColor: "rgba(220, 20, 60, 0.1)",
+              borderRadius: "4px",
+              fontSize: "0.9rem",
+            }}>
+              {err}
+            </div>
+          )}
 
-        <button disabled={busy} style={{ padding: 10 }}>
-          {busy ? "Logging in..." : "Login"}
-        </button>
-      </form>
+          <button
+            disabled={busy}
+            style={{
+              padding: "12px",
+              fontSize: "1rem",
+              minHeight: "44px",
+            }}
+          >
+            {busy ? "Logging in..." : "Login"}
+          </button>
+        </form>
+
+        <style>{`
+          @media (max-width: 480px) {
+            div {
+              padding: 10px;
+            }
+            form {
+              gap: 12px;
+            }
+          }
+        `}</style>
+      </div>
     </div>
   );
 }

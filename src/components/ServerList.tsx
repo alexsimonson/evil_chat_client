@@ -20,7 +20,12 @@ export function ServerList({
             padding: 10,
             border: "1px solid #ccc",
             background: s.id === activeServerId ? "#eee" : "white",
+            minHeight: "36px",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
           }}
+          title={s.name}
         >
           {s.name}
         </button>

@@ -58,6 +58,13 @@ export const api = {
     );
   },
 
+  // Channel creation
+  createChannel: (serverId: number, name: string, type: "text" | "voice") =>
+    apiFetch<{ channel: Channel }>(`/servers/${serverId}/channels`, {
+      method: "POST",
+      body: JSON.stringify({ name, type }),
+    }),
+
   // Voice participants - available to all members without being connected
   getVoiceParticipants: (serverId: number) =>
     apiFetch<{

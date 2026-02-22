@@ -18,6 +18,8 @@ export function ServerMemberList({ members }: { members: Member[] }) {
             border: "1px solid #ddd",
             borderRadius: 4,
             background: "white",
+            minHeight: "32px",
+            minWidth: 0,
           }}
         >
           <span
@@ -27,9 +29,17 @@ export function ServerMemberList({ members }: { members: Member[] }) {
               borderRadius: 999,
               background: m.online ? "#2ecc71" : "#aaa",
               display: "inline-block",
+              flexShrink: 0,
             }}
           />
-          <span style={{ fontSize: 12 }}>
+          <span style={{
+            fontSize: 12,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            minWidth: 0,
+          }}
+          title={m.displayName ?? m.username}>
             {m.displayName ?? m.username}
           </span>
         </div>
