@@ -9,6 +9,7 @@ import { VoiceChannelList } from "../components/VoiceChannelList";
 import { ServerMemberList } from "../components/ServerMemberList";
 import { MessageList } from "../components/MessageList";
 import { MessageComposer } from "../components/MessageComposer";
+import { VoiceParticipants } from "../components/VoiceParticipants";
 import { useVoice } from "../voice/useVoice";
 import { useSocket } from "../websocket/useSocket";
 
@@ -244,51 +245,21 @@ export function AppShell() {
           activeChannelId={activeChannelId}
           onSelect={setActiveChannelId}
         />
-        {activeChannel?.type === "voice" && (
-          <div style={{ marginTop: 12, padding: 10, border: "1px dashed #aaa" }}>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>Voice</div>
-
-            {voice.state.status === "idle" && (
-              <button onClick={() => onJoinVoice(activeChannel.id)}>
-                Join Voice
-              </button>
-            )}
-
-            {voice.state.status === "connecting" && <div>Connecting…</div>}
-
-            {voice.state.status === "connected" && (
-              <div style={{ display: "grid", gap: 8 }}>
-                <div>
-                  Room: <code>{voice.state.roomName}</code>
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => voice.toggleMute().catch(console.error)}>
-                    {voice.state.muted ? "Unmute" : "Mute"}
-                  </button>
-                  <button onClick={() => onLeaveVoice()}>Leave</button>
-                </div>
-              </div>
-            )}
-
-            {voice.state.status === "error" && (
-              <div style={{ color: "crimson" }}>
-                Voice error: {voice.state.message}
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
-      <div style={{ display: "grid", gridTemplateRows: "1fr auto" }}>
-        <MessageList messages={messages} />
-        {activeChannel?.type === "text" ? (
+      {activeChannel?.type === "text" ? (
+        <div style={{ display: "grid", gridTemplateRows: "1fr auto" }}>
+          <MessageList messages={messages} />
           <MessageComposer onSend={onSend} />
-        ) : (
-          <div style={{ padding: 12, borderTop: "1px solid #ddd", opacity: 0.7 }}>
-            Select a text channel to send messages.
-          </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <VoiceParticipants
+          activeChannel={activeChannel}
+          voice={voice}
+          onJoinVoice={onJoinVoice}
+          onLeaveVoice={onLeaveVoice}
+        />
+      )}
     </div>
   );
 }

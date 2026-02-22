@@ -1,18 +1,35 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Room } from "livekit-client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Room, Track } from "livekit-client";
 
 const API_URL = import.meta.env.VITE_API_URL as string;
 
 type VoiceState =
   | { status: "idle" }
   | { status: "connecting" }
-  | { status: "connected"; roomName: string; channelId: number; muted: boolean }
+  | {
+      status: "connected";
+      roomName: string;
+      channelId: number;
+      muted: boolean;
+      cameraEnabled: boolean;
+      screenShareEnabled: boolean;
+    }
   | { status: "error"; message: string };
+
+export type VideoTrackEntry = {
+  id: string;
+  participantId: string;
+  participantName: string;
+  source: string;
+  isLocal: boolean;
+  track: Track;
+};
 
 export function useVoice() {
   const roomRef = useRef<Room | null>(null);
   const [state, setState] = useState<VoiceState>({ status: "idle" });
   const currentChannelIdRef = useRef<number | null>(null);
+  const [videoTracks, setVideoTracks] = useState<VideoTrackEntry[]>([]);
 
   const leave = useCallback(() => {
     const room = roomRef.current;
@@ -23,6 +40,7 @@ export function useVoice() {
     }
 
     currentChannelIdRef.current = null;
+    setVideoTracks([]);
     setState({ status: "idle" });
   }, []);
 
@@ -62,13 +80,74 @@ export function useVoice() {
       room.on("reconnecting", () => console.log("LiveKit reconnecting..."));
       room.on("reconnected", () => console.log("LiveKit reconnected"));
 
-      room.on("trackSubscribed", (track) => {
+      const addVideoTrack = (
+        track: Track,
+        participant: { identity: string; name?: string },
+        source: string,
+        isLocal: boolean,
+        trackIdHint?: string
+      ) => {
+        if (track.kind !== "video") return;
+
+        const trackId =
+          trackIdHint ||
+          `${participant.identity}:${source}:${(track as any).sid ?? "video"}`;
+
+        setVideoTracks((prev) => {
+          if (prev.some((t) => t.track === track || t.id === trackId)) return prev;
+          return [
+            ...prev,
+            {
+              id: trackId,
+              participantId: participant.identity,
+              participantName: participant.name || participant.identity,
+              source,
+              isLocal,
+              track,
+            },
+          ];
+        });
+      };
+
+      const removeVideoTrack = (track: Track) => {
+        if (track.kind !== "video") return;
+        setVideoTracks((prev) => prev.filter((t) => t.track !== track));
+      };
+
+      room.on("trackSubscribed", (track, publication, participant) => {
         if (track.kind === "audio") {
           const audio = track.attach();
           audio.autoplay = true;
           audio.style.display = "none";
           document.body.appendChild(audio);
+          return;
         }
+
+        const source = String(publication?.source ?? (track as any).source ?? "camera");
+        const trackId = String(publication?.trackSid ?? (track as any).sid ?? "remote");
+        addVideoTrack(track, participant, source, false, trackId);
+      });
+
+      room.on("trackUnsubscribed", (track) => {
+        removeVideoTrack(track);
+      });
+
+      room.on("localTrackPublished", (publication, participant) => {
+        const track = publication.track;
+        if (!track) return;
+        const source = String(publication.source ?? (track as any).source ?? "camera");
+        const trackId = String(publication.trackSid ?? (track as any).sid ?? "local");
+        addVideoTrack(track, participant, source, true, trackId);
+      });
+
+      room.on("localTrackUnpublished", (publication) => {
+        if (publication.track) {
+          removeVideoTrack(publication.track);
+        }
+      });
+
+      room.on("participantDisconnected", (participant) => {
+        setVideoTracks((prev) => prev.filter((t) => t.participantId !== participant.identity));
       });
 
       await room.connect(url, token, { rtcConfig: { iceServers: iceServers ?? [{ urls: 'stun:stun.l.google.com:19302' }] } });
@@ -80,11 +159,14 @@ export function useVoice() {
         roomName,
         channelId,
         muted: false,
+        cameraEnabled: false,
+        screenShareEnabled: false,
       });
     } catch (e: any) {
       roomRef.current?.disconnect();
       roomRef.current = null;
       currentChannelIdRef.current = null;
+      setVideoTracks([]);
       setState({ status: "error", message: e?.message ?? "VOICE_ERROR" });
     }
   }, [leave]);
@@ -103,8 +185,54 @@ export function useVoice() {
     );
   }, []);
 
+  const toggleCamera = useCallback(async () => {
+    const room = roomRef.current;
+    if (!room) return;
+
+    const enabled = room.localParticipant.isCameraEnabled;
+    await room.localParticipant.setCameraEnabled(!enabled);
+
+    setState((prev) =>
+      prev.status === "connected"
+        ? { ...prev, cameraEnabled: !enabled }
+        : prev
+    );
+  }, []);
+
+  const toggleScreenShare = useCallback(async () => {
+    const room = roomRef.current;
+    if (!room) return;
+
+    const enabled = room.localParticipant.isScreenShareEnabled;
+    await room.localParticipant.setScreenShareEnabled(!enabled);
+
+    setState((prev) =>
+      prev.status === "connected"
+        ? { ...prev, screenShareEnabled: !enabled }
+        : prev
+    );
+  }, []);
+
+  const sortedVideoTracks = useMemo(() => {
+    return [...videoTracks].sort((a, b) => {
+      if (a.isLocal !== b.isLocal) return a.isLocal ? -1 : 1;
+      if (a.participantName !== b.participantName) {
+        return a.participantName.localeCompare(b.participantName);
+      }
+      return a.source.localeCompare(b.source);
+    });
+  }, [videoTracks]);
+
   // Cleanup on unmount
   useEffect(() => leave, [leave]);
 
-  return { state, join, leave, toggleMute };
+  return {
+    state,
+    join,
+    leave,
+    toggleMute,
+    toggleCamera,
+    toggleScreenShare,
+    videoTracks: sortedVideoTracks,
+  };
 }
