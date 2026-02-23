@@ -193,6 +193,11 @@ export const TransportRecordOpSchema = BaseOpSchema.extend({
   isRecording: z.boolean(),
 });
 
+// Project operations
+export const ProjectResetOpSchema = BaseOpSchema.extend({
+  type: z.literal('PROJECT_RESET'),
+});
+
 // Union of all operations
 export const DawOpSchema = z.discriminatedUnion('type', [
   TrackAddOpSchema,
@@ -222,6 +227,7 @@ export const DawOpSchema = z.discriminatedUnion('type', [
   TransportSeekOpSchema,
   TransportPositionTickOpSchema,
   TransportRecordOpSchema,
+  ProjectResetOpSchema,
 ]);
 
 export type DawOp = z.infer<typeof DawOpSchema>;
@@ -252,3 +258,4 @@ export type TransportStopOp = z.infer<typeof TransportStopOpSchema>;
 export type TransportSeekOp = z.infer<typeof TransportSeekOpSchema>;
 export type TransportPositionTickOp = z.infer<typeof TransportPositionTickOpSchema>;
 export type TransportRecordOp = z.infer<typeof TransportRecordOpSchema>;
+export type ProjectResetOp = z.infer<typeof ProjectResetOpSchema>;

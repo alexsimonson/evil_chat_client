@@ -303,6 +303,19 @@ export function ProjectDawPage({ projectId, room }: ProjectDawPageProps) {
     dispatchOp(op);
   }, [dawState, dispatchOp]);
 
+  const handleReset = useCallback(() => {
+    const op: DawOp = {
+      id: generateId(),
+      clientId,
+      timestamp: Date.now(),
+      baseVersion: dawState.version,
+      type: 'PROJECT_RESET',
+    };
+    dispatchOp(op);
+    audioEngine.stop();
+    setUiState(createDefaultUiState());
+  }, [dawState, dispatchOp]);
+
   // MIDI controls
   const handleAddMidiNote = useCallback((clipId: string, time: number, midi: number, duration: number, velocity: number) => {
     const noteId = generateId();
@@ -386,6 +399,7 @@ export function ProjectDawPage({ projectId, room }: ProjectDawPageProps) {
         onRecord={handleRecord}
         onSeek={handleSeek}
         onSetBpm={handleSetBpm}
+        onReset={handleReset}
       />
 
       {/* Main content */}

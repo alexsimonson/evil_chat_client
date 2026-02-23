@@ -159,6 +159,8 @@ export function SimpleDawView() {
   }, [room, clientId]);
   
   const dispatchOp = useCallback((op: DawOp) => {
+    console.log('[DAW] Dispatching operation:', op);
+    
     // Apply locally
     setDawState((prev) => applyOp(prev, op));
     
@@ -167,19 +169,67 @@ export function SimpleDawView() {
       livekitSyncRef.current.broadcastOp(op);
     }
 
-    // Save to server (fire and forget for now)
+    // Save to server with automatic retry on conflict
     if (projectId) {
-      fetch(`${API_URL}/projects/${projectId}/daw/ops`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          baseVersion: op.baseVersion,
-          ops: [op],
-        }),
-      }).catch((error) => {
-        console.error('[DAW] Failed to save operation:', error);
-      });
+      const submitWithRetry = async (retryCount = 0, maxRetries = 3) => {
+        const payload = { baseVersion: op.baseVersion, ops: [op] };
+        console.log('[DAW] Sending to server:', payload);
+        
+        try {
+          const res = await fetch(`${API_URL}/projects/${projectId}/daw/ops`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify(payload),
+          });
+
+          if (!res.ok) {
+            const errorData = await res.json().catch(() => ({}));
+            
+            // Handle version conflicts with automatic retry
+            if (res.status === 409 && retryCount < maxRetries) {
+              console.warn(`[DAW] Version conflict (attempt ${retryCount + 1}/${maxRetries}). Server version: ${errorData.serverVersion}`);
+              
+              // Reload current state from server
+              try {
+                const snapshotRes = await fetch(`${API_URL}/projects/${projectId}/daw/ops`, {
+                  credentials: 'include',
+                });
+                
+                if (snapshotRes.ok) {
+                  const { operations, version: serverVersion } = await snapshotRes.json();
+                  console.log(`[DAW] Reloaded from server. Correct version is: ${serverVersion}`);
+                  
+                  // Retry with corrected version
+                  const correctedOp = { ...op, baseVersion: serverVersion };
+                  console.log(`[DAW] Retrying with corrected baseVersion: ${serverVersion}`);
+                  
+                  // Replay through the system to update state
+                  setDawState((prev) => applyOp(prev, correctedOp));
+                  
+                  // Recursively retry
+                  await submitWithRetry(retryCount + 1, maxRetries);
+                  return;
+                }
+              } catch (reloadError) {
+                console.error('[DAW] Failed to reload version from server:', reloadError);
+              }
+            }
+            
+            const msg = `Server error: ${errorData.error || res.statusText}${errorData.message ? ` - ${errorData.message}` : ''}`;
+            console.error('[DAW] Failed to save operation:', msg);
+            throw new Error(msg);
+          }
+
+          const result = await res.json();
+          console.log('[DAW] Operation saved to server:', result);
+        } catch (error) {
+          console.error('[DAW] Failed to save operation:', error);
+          alert('[DAW Error] Failed to save operation: ' + (error instanceof Error ? error.message : String(error)));
+        }
+      };
+
+      submitWithRetry();
     }
   }, [projectId]);
 
@@ -366,6 +416,19 @@ export function SimpleDawView() {
     }
   }, [dawState, dispatchOp, clientId]);
 
+  const handleReset = useCallback(() => {
+    const op: DawOp = {
+      id: generateId(),
+      clientId,
+      timestamp: Date.now(),
+      baseVersion: dawState.version,
+      type: 'PROJECT_RESET',
+    };
+    dispatchOp(op);
+    audioEngine.stop();
+    setUiState(createDefaultUiState());
+  }, [dawState, dispatchOp, clientId]);
+
   // Add test MIDI clip
   const handleAddTestClip = useCallback(() => {
     const midiTrackId = Object.keys(dawState.tracks).find(
@@ -526,6 +589,7 @@ export function SimpleDawView() {
         onRecord={handleRecord}
         onSeek={handleSeek}
         onSetBpm={handleSetBpm}
+        onReset={handleReset}
       />
 
       {/* Helper toolbar */}

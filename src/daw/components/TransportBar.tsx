@@ -13,6 +13,7 @@ interface TransportBarProps {
   onRecord: () => void;
   onSeek: (seconds: number) => void;
   onSetBpm: (bpm: number) => void;
+  onReset: () => void;
 }
 
 export function TransportBar({
@@ -23,6 +24,7 @@ export function TransportBar({
   onRecord,
   onSeek,
   onSetBpm,
+  onReset,
 }: TransportBarProps) {
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -103,6 +105,24 @@ export function TransportBar({
           title="Toggle recording"
         >
           ● REC
+        </button>
+        <button
+          onClick={() => {
+            if (window.confirm('Are you sure you want to reset the project? This cannot be undone.')) {
+              onReset();
+            }
+          }}
+          style={{
+            padding: '8px 16px',
+            background: '#8b4513',
+            border: 'none',
+            borderRadius: '4px',
+            color: '#fff',
+            cursor: 'pointer',
+          }}
+          title="Reset project to fresh state"
+        >
+          ↻ Reset
         </button>
       </div>
 

@@ -42,7 +42,9 @@ export async function submitOps(projectId: string, baseVersion: number, ops: any
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to submit ops: ${response.statusText}`);
+    const errorData = await response.json().catch(() => ({}));
+    const errorMessage = `Failed to submit ops: ${response.statusText}${errorData.error ? ` (${errorData.error})` : ''}${errorData.message ? ` - ${errorData.message}` : ''}`;
+    throw new Error(errorMessage);
   }
 
   return response.json();

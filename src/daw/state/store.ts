@@ -332,6 +332,25 @@ export function applyOp(state: DawState, op: DawOp): DawState {
       break;
     }
 
+    case 'PROJECT_RESET': {
+      // Reset to fresh empty state, preserving projectId
+      return {
+        projectId: newState.projectId,
+        version: newState.version + 1,
+        tracks: {},
+        audioAssets: {},
+        audioClips: {},
+        midiClips: {},
+        trackOrder: [],
+        transport: {
+          bpm: 120,
+          isPlaying: false,
+          isRecording: false,
+          positionSeconds: 0,
+        },
+      };
+    }
+
     default: {
       // Exhaustiveness check
       const _exhaustive: never = op;
