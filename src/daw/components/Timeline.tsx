@@ -13,6 +13,7 @@ interface TimelineProps {
   onAudioClipMove: (clipId: string, newStart: number) => void;
   onMidiClipMove: (clipId: string, newStart: number) => void;
   onOpenMidiEditor: (clipId: string) => void;
+  onSeek: (positionSeconds: number) => void;
 }
 
 export function Timeline({
@@ -23,6 +24,7 @@ export function Timeline({
   onAudioClipMove,
   onMidiClipMove,
   onOpenMidiEditor,
+  onSeek,
 }: TimelineProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [dragState, setDragState] = React.useState<{
@@ -30,15 +32,42 @@ export function Timeline({
     type: 'audio' | 'midi' | null;
     startX: number;
     originalStart: number;
-  }>({ clipId: null, type: null, startX: 0, originalStart: 0 });
+    draggingPlayhead: boolean;
+  }>({ clipId: null, type: null, startX: 0, originalStart: 0, draggingPlayhead: false });
+  const [playheadPosition, setPlayheadPosition] = React.useState(state.transport.positionSeconds);
 
   const tracks = state.trackOrder.map((id) => state.tracks[id]);
   const TRACK_HEIGHT = 80;
   const HEADER_HEIGHT = 30;
 
+  // Update playhead position during playback or when state changes
+  useEffect(() => {
+    if (!state.transport.isPlaying || !state.transport.startedAtWallClock) {
+      // Not playing, use the state position
+      setPlayheadPosition(state.transport.positionSeconds);
+      return;
+    }
+
+    // Set up animation frame loop for smooth playhead movement during playback
+    let animationFrameId: number;
+
+    const updatePlayheadPosition = () => {
+      const elapsed = (Date.now() - state.transport.startedAtWallClock!) / 1000;
+      const currentPosition = state.transport.positionSeconds + elapsed;
+      setPlayheadPosition(currentPosition);
+      animationFrameId = requestAnimationFrame(updatePlayheadPosition);
+    };
+
+    animationFrameId = requestAnimationFrame(updatePlayheadPosition);
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, [state.transport.isPlaying, state.transport.positionSeconds, state.transport.startedAtWallClock]);
+
   useEffect(() => {
     drawTimeline();
-  }, [state, zoom, selectedClipId]);
+  }, [state, zoom, selectedClipId, playheadPosition]);
 
   const drawTimeline = () => {
     const canvas = canvasRef.current;
@@ -67,7 +96,7 @@ export function Timeline({
     });
 
     // Draw playhead
-    const playheadX = state.transport.positionSeconds * zoom;
+    const playheadX = playheadPosition * zoom;
     ctx.strokeStyle = '#ff4a4a';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -217,6 +246,37 @@ export function Timeline({
     const x = e.clientX - rect.left + canvas.parentElement!.scrollLeft;
     const y = e.clientY - rect.top + canvas.parentElement!.scrollTop;
 
+    // Check if clicking in the header (ruler area)
+    if (y < HEADER_HEIGHT) {
+      // Clicking on the ruler - seek or drag playhead
+      const clickTime = x / zoom;
+      onSeek(Math.max(0, clickTime));
+      
+      // Allow dragging the playhead from the ruler area
+      setDragState({
+        clipId: null,
+        type: null,
+        startX: x,
+        originalStart: playheadPosition,
+        draggingPlayhead: true,
+      });
+      return;
+    }
+
+    // Check playhead click tolerance (5 pixels on either side)
+    const playheadX = playheadPosition * zoom;
+    if (Math.abs(x - playheadX) < 10) {
+      // Clicked on playhead - start dragging it
+      setDragState({
+        clipId: null,
+        type: null,
+        startX: x,
+        originalStart: playheadPosition,
+        draggingPlayhead: true,
+      });
+      return;
+    }
+
     // Check if clicking on a clip
     const trackIndex = Math.floor((y - HEADER_HEIGHT) / TRACK_HEIGHT);
     if (trackIndex < 0 || trackIndex >= tracks.length) return;
@@ -230,7 +290,7 @@ export function Timeline({
       );
       if (clip) {
         onSelectClip(clip.id, 'audio');
-        setDragState({ clipId: clip.id, type: 'audio', startX: x, originalStart: clip.start });
+        setDragState({ clipId: clip.id, type: 'audio', startX: x, originalStart: clip.start, draggingPlayhead: false });
       }
     } else if (track.type === 'midi') {
       const clip = Object.values(state.midiClips).find(
@@ -238,19 +298,28 @@ export function Timeline({
       );
       if (clip) {
         onSelectClip(clip.id, 'midi');
-        setDragState({ clipId: clip.id, type: 'midi', startX: x, originalStart: clip.start });
+        setDragState({ clipId: clip.id, type: 'midi', startX: x, originalStart: clip.start, draggingPlayhead: false });
       }
     }
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!dragState.clipId || !dragState.type) return;
-
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left + canvas.parentElement!.scrollLeft;
+
+    // Handle playhead dragging
+    if (dragState.draggingPlayhead) {
+      const deltaTime = (x - dragState.startX) / zoom;
+      const newPosition = Math.max(0, dragState.originalStart + deltaTime);
+      onSeek(newPosition);
+      return;
+    }
+
+    // Handle clip dragging
+    if (!dragState.clipId || !dragState.type) return;
 
     const deltaTime = (x - dragState.startX) / zoom;
     const newStart = Math.max(0, dragState.originalStart + deltaTime);
@@ -263,7 +332,7 @@ export function Timeline({
   };
 
   const handleMouseUp = () => {
-    setDragState({ clipId: null, type: null, startX: 0, originalStart: 0 });
+    setDragState({ clipId: null, type: null, startX: 0, originalStart: 0, draggingPlayhead: false });
   };
 
   const handleDoubleClick = (_e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -284,7 +353,10 @@ export function Timeline({
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onDoubleClick={handleDoubleClick}
-        style={{ cursor: dragState.clipId ? 'grabbing' : 'default', display: 'block' }}
+        style={{
+          cursor: dragState.draggingPlayhead ? 'grabbing' : dragState.clipId ? 'grabbing' : 'default',
+          display: 'block'
+        }}
       />
     </div>
   );

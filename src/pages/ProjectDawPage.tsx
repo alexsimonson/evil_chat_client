@@ -35,6 +35,8 @@ export function ProjectDawPage({ projectId, room }: ProjectDawPageProps) {
   const audioEngine = getAudioEngine();
   const clientId = useRef(generateId()).current;
   const pendingOps = useRef<DawOp[]>([]);
+  const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null); // For debouncing seek operations during drag
+  const pendingSeekRef = useRef<number | null>(null); // Track the latest pending seek position
 
   // Load initial state from server
   useEffect(() => {
@@ -171,16 +173,30 @@ export function ProjectDawPage({ projectId, room }: ProjectDawPageProps) {
   }, [dawState, dispatchOp]);
 
   const handleSeek = useCallback((seconds: number) => {
-    const op: DawOp = {
-      id: generateId(),
-      clientId,
-      timestamp: Date.now(),
-      baseVersion: dawState.version,
-      type: 'TRANSPORT_SEEK',
-      positionSeconds: seconds,
-    };
-    dispatchOp(op);
-    audioEngine.seek(seconds);
+    // Store the pending seek position
+    pendingSeekRef.current = seconds;
+
+    // Clear any existing timeout
+    if (seekTimeoutRef.current) {
+      clearTimeout(seekTimeoutRef.current);
+    }
+
+    // Set a new debounce timer - sends seek operation after 50ms of no new seeks
+    seekTimeoutRef.current = setTimeout(() => {
+      const seekPosition = pendingSeekRef.current ?? seconds;
+      const op: DawOp = {
+        id: generateId(),
+        clientId,
+        timestamp: Date.now(),
+        baseVersion: dawState.version,
+        type: 'TRANSPORT_SEEK',
+        positionSeconds: seekPosition,
+      };
+      dispatchOp(op);
+      audioEngine.seek(seekPosition);
+      seekTimeoutRef.current = null;
+      pendingSeekRef.current = null;
+    }, 50); // Debounce for 50ms - batches rapid seeks from dragging
   }, [dawState, dispatchOp]);
 
   const handleSetBpm = useCallback((bpm: number) => {
@@ -377,6 +393,15 @@ export function ProjectDawPage({ projectId, room }: ProjectDawPageProps) {
     dispatchOp(op);
   }, [dawState, dispatchOp]);
 
+  // Cleanup: clear pending seeks on unmount
+  useEffect(() => {
+    return () => {
+      if (seekTimeoutRef.current) {
+        clearTimeout(seekTimeoutRef.current);
+      }
+    };
+  }, []);
+
   if (loading) {
     return <div style={{ padding: 20 }}>Loading DAW...</div>;
   }
@@ -449,6 +474,7 @@ export function ProjectDawPage({ projectId, room }: ProjectDawPageProps) {
             dispatchOp(op);
           }}
           onOpenMidiEditor={(clipId) => setUiState({ ...uiState, editingMidiClipId: clipId })}
+          onSeek={handleSeek}
         />
       </div>
 

@@ -6,6 +6,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { Room } from 'livekit-client';
 import { applyOp } from '../daw/state/store';
 import { getAudioEngine } from '../daw/audio/audioEngine';
+import { createRecording } from '../daw/audio/useRecording';
 import { LiveKitSync } from '../daw/livekit/sync';
 import { TransportBar } from '../daw/components/TransportBar';
 import { TrackList } from '../daw/components/TrackList';
@@ -30,6 +31,10 @@ export function SimpleDawView() {
   const audioEngine = getAudioEngine();
   const clientId = useRef(generateId()).current;
   const livekitSyncRef = useRef<LiveKitSync | null>(null);
+  const recordingFunctionsRef = useRef<{ start: () => Promise<void>; stop: () => void } | null>(null);
+  const dawStateRef = useRef<DawState | null>(null); // Keep current state for recording functions
+  const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null); // For debouncing seek operations during drag
+  const pendingSeekRef = useRef<number | null>(null); // Track the latest pending seek position
 
   // Fetch shared DAW project ID
   useEffect(() => {
@@ -197,12 +202,13 @@ export function SimpleDawView() {
                 });
                 
                 if (snapshotRes.ok) {
-                  const { operations, version: serverVersion } = await snapshotRes.json();
-                  console.log(`[DAW] Reloaded from server. Correct version is: ${serverVersion}`);
+                  const responseData = await snapshotRes.json();
+                  const correctedVersion = responseData.version;
+                  console.log(`[DAW] Reloaded from server. Correct version is: ${correctedVersion}`);
                   
                   // Retry with corrected version
-                  const correctedOp = { ...op, baseVersion: serverVersion };
-                  console.log(`[DAW] Retrying with corrected baseVersion: ${serverVersion}`);
+                  const correctedOp = { ...op, baseVersion: correctedVersion };
+                  console.log(`[DAW] Retrying with corrected baseVersion: ${correctedVersion}`);
                   
                   // Replay through the system to update state
                   setDawState((prev) => applyOp(prev, correctedOp));
@@ -232,6 +238,145 @@ export function SimpleDawView() {
       submitWithRetry();
     }
   }, [projectId]);
+
+  // Initialize recording functions after dispatchOp is available
+  // ONLY recreate when: projectId changes, dawState.tracks/versions change, or clientId changes
+  // NOT on every dispatchOp call
+  useEffect(() => {
+    const handleRecordingComplete = (blob: Blob, armedTrackIds: string[], duration: number) => {
+      console.log(`[DAW] handleRecordingComplete called: ${duration.toFixed(2)}s on ${armedTrackIds.length} tracks, blob size: ${blob.size}`);
+      console.log(`[DAW] Project ID: ${projectId}, Armed track IDs:`, armedTrackIds);
+
+      // Upload blob to server and create audio asset + clips
+      const uploadRecording = async () => {
+        try {
+          console.log('[DAW] Starting uploadRecording...');
+          
+          // Validate we have required data
+          if (!projectId) {
+            throw new Error('Project ID is null');
+          }
+          if (armedTrackIds.length === 0) {
+            throw new Error('No armed track IDs provided');
+          }
+          if (blob.size === 0) {
+            throw new Error('Recording blob is empty');
+          }
+
+          // Convert blob to base64 for transmission
+          const reader = new FileReader();
+          console.log('[DAW] FileReader created, starting to read blob as data URL...');
+          
+          reader.onloadstart = () => {
+            console.log('[DAW] FileReader: loadstart event fired');
+          };
+          
+          reader.onload = async () => {
+            console.log('[DAW] FileReader: onload event fired');
+            const base64Data = reader.result as string;
+            console.log(`[DAW] Base64 data created, length: ${base64Data.length} characters`);
+
+            // Upload the recorded audio
+            console.log('[DAW] Sending upload request to server...');
+            const uploadRes = await fetch(`${API_URL}/projects/${projectId}/audio/upload`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                audioData: base64Data,
+                mimeType: blob.type,
+                duration,
+              }),
+            });
+
+            console.log(`[DAW] Upload response received: status ${uploadRes.status}`);
+
+            if (!uploadRes.ok) {
+              const error = await uploadRes.json().catch(() => ({}));
+              throw new Error(`Upload failed: ${error.error || uploadRes.statusText}`);
+            }
+
+            const { audioUrl } = await uploadRes.json();
+            console.log('[DAW] Recording uploaded successfully, audioUrl:', audioUrl);
+
+            // Create AUDIO_ASSET_ADD operation
+            const assetId = generateId();
+            const assetOp: DawOp = {
+              id: generateId(),
+              clientId,
+              timestamp: Date.now(),
+              baseVersion: dawState.version,
+              type: 'AUDIO_ASSET_ADD',
+              assetId,
+              url: audioUrl,
+              duration,
+              name: `Recording ${new Date().toLocaleTimeString()}`,
+            };
+            console.log('[DAW] Dispatching AUDIO_ASSET_ADD op, asset ID:', assetId);
+            dispatchOp(assetOp);
+
+            // Create audio clips on each armed track
+            let currentVersion = dawState.version + 1;
+            armedTrackIds.forEach((trackId, index) => {
+              const clipId = generateId();
+              const clipOp: DawOp = {
+                id: generateId(),
+                clientId,
+                timestamp: Date.now(),
+                baseVersion: currentVersion + index,
+                type: 'AUDIO_CLIP_ADD',
+                clipId,
+                trackId,
+                assetId,
+                start: dawState.transport.positionSeconds,
+                duration,
+                gain: 0.8,
+                offset: 0,
+              };
+              console.log(`[DAW] Dispatching AUDIO_CLIP_ADD op for track ${trackId}, clip ID: ${clipId}`);
+              dispatchOp(clipOp);
+            });
+
+            console.log('[DAW] All operations dispatched successfully!');
+          };
+          
+          reader.onerror = (error) => {
+            console.error('[DAW] FileReader error:', error);
+            throw new Error(`FileReader error: ${error}`);
+          };
+          
+          console.log('[DAW] Calling reader.readAsDataURL...');
+          reader.readAsDataURL(blob);
+        } catch (error) {
+          console.error('[DAW] Failed to save recording:', error);
+          alert(`Recording completed but failed to sync: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      };
+
+      console.log('[DAW] Calling uploadRecording()');
+      uploadRecording();
+    };
+
+    // Create recording functions - store in ref for persistence across renders
+    // Note: Armed tracks are checked dynamically when recording starts using the ref
+    const recordingFuncs = createRecording(
+      () => {
+        // Get armed tracks dynamically at the time of use from ref (always current)
+        if (!dawStateRef.current) return [];
+        return Object.entries(dawStateRef.current.tracks)
+          .filter(([_, track]) => track.type === 'audio' && track.armed)
+          .map(([id]) => id);
+      },
+      handleRecordingComplete
+    );
+    recordingFunctionsRef.current = recordingFuncs;
+    console.log('[DAW] Recording functions created and stored in ref');
+  }, [projectId, clientId]);
+
+  // Keep dawState ref in sync with current state so recording functions always see current tracks
+  useEffect(() => {
+    dawStateRef.current = dawState;
+  }, [dawState]);
 
   // Transport controls
   const handlePlay = useCallback(() => {
@@ -276,16 +421,30 @@ export function SimpleDawView() {
   }, [dawState, dispatchOp, clientId]);
 
   const handleSeek = useCallback((seconds: number) => {
-    const op: DawOp = {
-      id: generateId(),
-      clientId,
-      timestamp: Date.now(),
-      baseVersion: dawState.version,
-      type: 'TRANSPORT_SEEK',
-      positionSeconds: seconds,
-    };
-    dispatchOp(op);
-    audioEngine.seek(seconds);
+    // Store the pending seek position
+    pendingSeekRef.current = seconds;
+
+    // Clear any existing timeout
+    if (seekTimeoutRef.current) {
+      clearTimeout(seekTimeoutRef.current);
+    }
+
+    // Set a new debounce timer - sends seek operation after 50ms of no new seeks
+    seekTimeoutRef.current = setTimeout(() => {
+      const seekPosition = pendingSeekRef.current ?? seconds;
+      const op: DawOp = {
+        id: generateId(),
+        clientId,
+        timestamp: Date.now(),
+        baseVersion: dawState.version,
+        type: 'TRANSPORT_SEEK',
+        positionSeconds: seekPosition,
+      };
+      dispatchOp(op);
+      audioEngine.seek(seekPosition);
+      seekTimeoutRef.current = null;
+      pendingSeekRef.current = null;
+    }, 50); // Debounce for 50ms - batches rapid seeks from dragging
   }, [dawState, dispatchOp, clientId]);
 
   const handleSetBpm = useCallback((bpm: number) => {
@@ -408,13 +567,43 @@ export function SimpleDawView() {
     dispatchOp(op);
 
     if (newRecordingState) {
-      // Start recording on armed tracks
-      console.log('[DAW] Recording started on armed tracks');
-      // TODO: Implement actual audio recording from microphone
+      // Check if we have armed audio tracks
+      const armedAudioTracks = Object.entries(dawState.tracks)
+        .filter(([_, track]) => track.type === 'audio' && track.armed);
+
+      if (armedAudioTracks.length === 0) {
+        alert('Please arm at least one audio track to record');
+        // Disable recording if no armed tracks
+        dispatchOp({
+          id: generateId(),
+          clientId,
+          timestamp: Date.now(),
+          baseVersion: dawState.version + 1,
+          type: 'TRANSPORT_RECORD',
+          isRecording: false,
+        });
+        return;
+      }
+
+      console.log('[DAW] Starting recording on armed audio tracks');
+      console.log('[DAW] recordingFunctions available:', recordingFunctionsRef.current !== null);
+      if (recordingFunctionsRef.current) {
+        console.log('[DAW] Calling recordingFunctions.start()');
+        recordingFunctionsRef.current.start().catch(err => console.error('[DAW] Recording start error:', err));
+      } else {
+        console.warn('[DAW] recordingFunctions is null! Recording not started.');
+      }
     } else {
-      console.log('[DAW] Recording stopped');
+      console.log('[DAW] Stopping recording');
+      console.log('[DAW] recordingFunctions available:', recordingFunctionsRef.current !== null);
+      if (recordingFunctionsRef.current) {
+        console.log('[DAW] Calling recordingFunctions.stop()');
+        recordingFunctionsRef.current.stop();
+      } else {
+        console.warn('[DAW] recordingFunctions is null! Recording not stopped.');
+      }
     }
-  }, [dawState, dispatchOp, clientId]);
+  }, [dawState, dispatchOp, clientId, recordingFunctionsRef]);
 
   const handleReset = useCallback(() => {
     const op: DawOp = {
@@ -531,6 +720,15 @@ export function SimpleDawView() {
     };
     dispatchOp(op);
   }, [dawState, dispatchOp, clientId]);
+
+  // Cleanup: clear pending seeks on unmount
+  useEffect(() => {
+    return () => {
+      if (seekTimeoutRef.current) {
+        clearTimeout(seekTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const tracks = dawState.trackOrder.map((id) => dawState.tracks[id]);
   const editingClip = uiState.editingMidiClipId ? dawState.midiClips[uiState.editingMidiClipId] : null;
@@ -663,6 +861,7 @@ export function SimpleDawView() {
             dispatchOp(op);
           }}
           onOpenMidiEditor={(clipId) => setUiState({ ...uiState, editingMidiClipId: clipId })}
+          onSeek={handleSeek}
         />
       </div>
 
