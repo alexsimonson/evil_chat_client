@@ -13,10 +13,15 @@ import { MessageComposer } from "../components/MessageComposer";
 import { VoiceParticipants } from "../components/VoiceParticipants";
 import { useVoice } from "../voice/useVoice";
 import { useSocket } from "../websocket/useSocket";
+import { SimpleDawView } from "./SimpleDawView";
 
 type TabType = "servers" | "text" | "voice";
 
 export function AppShell() {
+  // DAW view toggle
+  const [showDaw, setShowDaw] = useState(false);
+
+  // Call all hooks before any conditional returns
   const { state, logout } = useAuth();
   const user = state.status === "authed" ? state.user : null;
 
@@ -245,6 +250,21 @@ export function AppShell() {
     }
   }
 
+  // If in DAW mode, show DAW instead of chat
+  if (showDaw) {
+    return (
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '10px 20px', background: '#2a2a2a', borderBottom: '1px solid #444', color: '#fff', display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <button onClick={() => setShowDaw(false)} style={{ padding: '8px 16px', background: '#555', border: 'none', borderRadius: '4px', color: '#fff', cursor: 'pointer' }}>
+            ← Back to Chat
+          </button>
+          <h2 style={{ margin: 0, fontSize: '18px' }}>🎵 Collaborative DAW</h2>
+        </div>
+        <SimpleDawView />
+      </div>
+    );
+  }
+
   return (
     <div style={{
       display: "flex",
@@ -288,9 +308,14 @@ export function AppShell() {
               <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
                 {state.status === "authed" ? state.user.username : "..."}
               </strong>
-              <button onClick={() => logout().catch(console.error)} style={{ whiteSpace: "nowrap", padding: "6px 12px", fontSize: "0.85rem" }}>
-                Logout
-              </button>
+              <div style={{ display: "flex", gap: "4px" }}>
+                <button onClick={() => setShowDaw(true)} style={{ whiteSpace: "nowrap", padding: "6px 12px", fontSize: "0.85rem", background: "#4a9eff", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer" }}>
+                  🎵 DAW
+                </button>
+                <button onClick={() => logout().catch(console.error)} style={{ whiteSpace: "nowrap", padding: "6px 12px", fontSize: "0.85rem" }}>
+                  Logout
+                </button>
+              </div>
             </div>
 
             <h3 style={{ marginTop: "16px", marginBottom: "8px", fontSize: "0.95rem" }}>Servers</h3>
@@ -428,6 +453,31 @@ export function AppShell() {
                   activeServerId={activeServerId}
                   onSelect={setActiveServerId}
                 />
+                
+                <h3 style={{ marginTop: "24px" }}>Projects</h3>
+                <button
+                  onClick={() => setShowDaw(true)}
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    background: "linear-gradient(135deg, #9e4aff 0%, #4a9eff 100%)",
+                    border: "none",
+                    borderRadius: "8px",
+                    color: "#fff",
+                    cursor: "pointer",
+                    fontSize: "14px",
+                    fontWeight: "600",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "8px",
+                    boxShadow: "0 2px 8px rgba(158, 74, 255, 0.3)",
+                  }}
+                >
+                  <span style={{ fontSize: "18px" }}>🎵</span>
+                  Collaborative DAW
+                </button>
+                
                 <h3 style={{ marginTop: "24px" }}>Members</h3>
                 <ServerMemberList members={members} />
               </div>
