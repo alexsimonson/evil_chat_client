@@ -7,6 +7,7 @@ import { Room } from 'livekit-client';
 import { applyOp } from '../daw/state/store';
 import { getAudioEngine } from '../daw/audio/audioEngine';
 import { createRecording } from '../daw/audio/useRecording';
+import { extractWaveformData } from '../daw/audio/waveformExtractor';
 import { LiveKitSync } from '../daw/livekit/sync';
 import { TransportBar } from '../daw/components/TransportBar';
 import { TrackList } from '../daw/components/TrackList';
@@ -16,7 +17,6 @@ import type { DawState, UiState } from '../daw/types';
 import { createEmptyDawState, createDefaultUiState } from '../daw/types';
 import { createInitialLocalUIState, applyLocalUIAction } from '../daw/state/localState';
 import type { DawOp } from '../daw/state/ops';
-import type { LocalUIAction } from '../daw/state/localState';
 
 const generateId = () => Math.random().toString(36).substring(2, 15);
 const API_URL = import.meta.env.VITE_API_URL as string;
@@ -30,6 +30,7 @@ export function SimpleDawView() {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<number | null>(null);
   const [isLoadingProject, setIsLoadingProject] = useState(true);
+  const [waveformDataMap, setWaveformDataMap] = useState(new Map<string, Float32Array[]>());
 
   const audioEngine = getAudioEngine();
   const clientId = useRef(generateId()).current;
@@ -281,8 +282,8 @@ export function SimpleDawView() {
   // ONLY recreate when: projectId changes, dawState.tracks/versions change, or clientId changes
   // NOT on every dispatchOp call
   useEffect(() => {
-    const handleRecordingComplete = (blob: Blob, armedTrackIds: string[], duration: number) => {
-      console.log(`[DAW] handleRecordingComplete called: ${duration.toFixed(2)}s on ${armedTrackIds.length} tracks, blob size: ${blob.size}`);
+    const handleRecordingComplete = (blob: Blob, armedTrackIds: string[], duration: number, waveformData?: Float32Array[]) => {
+      console.log(`[DAW] handleRecordingComplete called: ${duration.toFixed(2)}s on ${armedTrackIds.length} tracks, blob size: ${blob.size}${waveformData ? `, waveform channels: ${waveformData.length}` : ''}`);
       console.log(`[DAW] Project ID: ${projectId}, Armed track IDs:`, armedTrackIds);
 
       // Upload blob to server and create audio asset + clips
@@ -339,6 +340,20 @@ export function SimpleDawView() {
 
             // Create AUDIO_ASSET_ADD operation
             const assetId = generateId();
+            
+            // Store waveform data for visualization
+            if (waveformData) {
+              console.log(`[DAW] Storing waveform data for asset ${assetId}: ${waveformData.length} channels, samples: ${waveformData.map(ch => ch.length).join(', ')}`);
+              setWaveformDataMap((prev) => {
+                const newMap = new Map(prev);
+                newMap.set(assetId, waveformData);
+                console.log(`[DAW] Waveform map updated. Total assets: ${newMap.size}`);
+                return newMap;
+              });
+            } else {
+              console.warn('[DAW] No waveform data available for this recording');
+            }
+            
             const assetOp: DawOp = {
               id: generateId(),
               clientId,
@@ -429,6 +444,48 @@ export function SimpleDawView() {
 
     return () => clearInterval(interval);
   }, [localUIState.isPlaying]);
+
+  // Extract waveforms from audio assets
+  useEffect(() => {
+    const extractAllWaveforms = async () => {
+      const assetIds = Object.keys(dawState.audioAssets);
+      if (assetIds.length === 0) return;
+
+      console.log(`[DAW] Extracting waveforms for ${assetIds.length} audio assets`);
+
+      for (const assetId of assetIds) {
+        const asset = dawState.audioAssets[assetId];
+        
+        // Skip if already have waveform data
+        if (waveformDataMap.has(assetId)) {
+          console.log(`[DAW] Waveform already cached for asset ${assetId}`);
+          continue;
+        }
+
+        try {
+          console.log(`[DAW] Fetching audio from URL for asset ${assetId}: ${asset.url}`);
+          const response = await fetch(asset.url);
+          if (!response.ok) throw new Error(`Failed to fetch audio: ${response.status}`);
+          
+          const blob = await response.blob();
+          console.log(`[DAW] Fetched ${blob.size} bytes, extracting waveform...`);
+          
+          const waveformData = await extractWaveformData(blob);
+          
+          setWaveformDataMap((prev) => {
+            const newMap = new Map(prev);
+            newMap.set(assetId, waveformData);
+            console.log(`[DAW] Waveform extracted and cached for asset ${assetId}. Total cached: ${newMap.size}`);
+            return newMap;
+          });
+        } catch (error) {
+          console.error(`[DAW] Failed to extract waveform for asset ${assetId}:`, error);
+        }
+      }
+    };
+
+    extractAllWaveforms();
+  }, [dawState.audioAssets]);
 
   // Transport controls - now local only
   const handlePlay = useCallback(() => {
@@ -823,6 +880,7 @@ export function SimpleDawView() {
           isPlaying={localUIState.isPlaying}
           zoom={uiState.zoom}
           selectedClipId={uiState.selectedClipId}
+          waveformDataMap={waveformDataMap}
           onSelectClip={(id, type) => setUiState({ ...uiState, selectedClipId: id, selectedClipType: type })}
           onAudioClipMove={(clipId, start) => {
             const op: DawOp = {

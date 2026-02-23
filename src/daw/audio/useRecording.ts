@@ -3,8 +3,10 @@
  * Records audio from microphone to armed tracks
  */
 
+import { extractWaveformData } from './waveformExtractor';
+
 export interface RecorderConfig {
-  onRecordingComplete: (blob: Blob, duration: number) => void;
+  onRecordingComplete: (blob: Blob, duration: number, waveformData?: Float32Array[]) => void;
   onRecordingFailed: (error: Error) => void;
 }
 
@@ -44,7 +46,7 @@ export class AudioRecorder {
       };
 
       // Handle stop
-      this.mediaRecorder.onstop = () => {
+      this.mediaRecorder.onstop = async () => {
         const duration = (performance.now() - this.startTime) / 1000;
         const blob = new Blob(this.recordedChunks, { type: 'audio/webm' });
         console.log(`[Recording] Media recorder stopped. Chunks collected: ${this.recordedChunks.length}, Blob size: ${blob.size} bytes, Duration: ${duration.toFixed(2)}s`);
@@ -53,7 +55,18 @@ export class AudioRecorder {
           console.warn('[Recording] WARNING: Blob size is 0 - no audio data captured!');
         }
         
-        this.config.onRecordingComplete(blob, duration);
+        // Extract waveform data
+        let waveformData: Float32Array[] | undefined;
+        try {
+          console.log('[Recording] Extracting waveform data...');
+          waveformData = await extractWaveformData(blob);
+          console.log('[Recording] Waveform extraction complete');
+        } catch (error) {
+          console.error('[Recording] Failed to extract waveform data:', error);
+          // Continue without waveform data - it's optional
+        }
+        
+        this.config.onRecordingComplete(blob, duration, waveformData);
         
         // Stop all tracks
         stream.getTracks().forEach(track => track.stop());
@@ -96,7 +109,7 @@ export class AudioRecorder {
  */
 export function createRecording(
   getArmedTracks: () => string[],
-  onRecordingComplete: (blob: Blob, trackIds: string[], duration: number) => void
+  onRecordingComplete: (blob: Blob, trackIds: string[], duration: number, waveformData?: Float32Array[]) => void
 ): { start: () => Promise<void>; stop: () => void } {
   let recorder: AudioRecorder | null = null;
   let currentArmedTracks: string[] = [];
@@ -116,9 +129,9 @@ export function createRecording(
 
       console.log('[Recording] Creating AudioRecorder instance...');
       recorder = new AudioRecorder({
-        onRecordingComplete: (blob, duration) => {
+        onRecordingComplete: (blob, duration, waveformData) => {
           console.log('[Recording] AudioRecorder callback fired, calling onRecordingComplete');
-          onRecordingComplete(blob, currentArmedTracks, duration);
+          onRecordingComplete(blob, currentArmedTracks, duration, waveformData);
         },
         onRecordingFailed: (error) => {
           console.error('[Recording] Error during recording:', error);

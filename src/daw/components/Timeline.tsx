@@ -4,6 +4,7 @@
 
 import React, { useRef, useEffect } from 'react';
 import type { DawState, AudioClip, MidiClip, Track } from '../types';
+import { calculateWaveformBounds, getWaveformColor } from '../audio/waveformExtractor';
 
 interface TimelineProps {
   state: DawState;
@@ -16,6 +17,7 @@ interface TimelineProps {
   onMidiClipMove: (clipId: string, newStart: number) => void;
   onOpenMidiEditor: (clipId: string) => void;
   onSeek: (positionSeconds: number) => void;
+  waveformDataMap?: Map<string, Float32Array[]>; // assetId -> waveform data
 }
 
 export function Timeline({
@@ -29,6 +31,7 @@ export function Timeline({
   onMidiClipMove,
   onOpenMidiEditor,
   onSeek,
+  waveformDataMap,
 }: TimelineProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [dragState, setDragState] = React.useState<{
@@ -45,7 +48,7 @@ export function Timeline({
 
   useEffect(() => {
     drawTimeline();
-  }, [state, zoom, selectedClipId, playheadSeconds]);
+  }, [state, zoom, selectedClipId, playheadSeconds, waveformDataMap]);
 
   const drawTimeline = () => {
     const canvas = canvasRef.current;
@@ -162,19 +165,79 @@ export function Timeline({
       ctx.fillText(asset.name, x + 5, y + 15);
     }
 
-    // Waveform placeholder (simplified - would use actual waveform data in production)
-    ctx.strokeStyle = '#5af';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let i = 0; i < w; i += 2) {
-      const amplitude = Math.sin(i * 0.1) * (h / 4) + h / 2;
-      if (i === 0) {
-        ctx.moveTo(x + i, y + amplitude);
-      } else {
-        ctx.lineTo(x + i, y + amplitude);
+    // Draw waveform
+    const waveformData = waveformDataMap?.get(clip.assetId);
+    if (waveformData && waveformData.length > 0) {
+      console.log(`[Timeline] Drawing waveform for asset ${clip.assetId}, channels: ${waveformData.length}, samples: ${waveformData[0].length}`);
+      drawWaveform(ctx, waveformData, x, y, w, h, isSelected);
+    } else {
+      console.log(`[Timeline] No waveform data for asset ${clip.assetId}, using placeholder`);
+      // Fallback to placeholder if no waveform data
+      ctx.strokeStyle = '#5af';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      const amplitude = h / 4;
+      const centerY = y + h / 2;
+      for (let i = 0; i < w; i += 2) {
+        const waveY = centerY + Math.sin(i * 0.1) * amplitude;
+        if (i === 0) {
+          ctx.moveTo(x + i, waveY);
+        } else {
+          ctx.lineTo(x + i, waveY);
+        }
       }
+      ctx.stroke();
     }
-    ctx.stroke();
+  };
+
+  const drawWaveform = (
+    ctx: CanvasRenderingContext2D,
+    waveformData: Float32Array[],
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    isSelected: boolean
+  ) => {
+    const bounds = calculateWaveformBounds(waveformData);
+    const centerY = y + h / 2;
+    const pixelsPerSample = w / (waveformData[0]?.length ?? 1);
+
+    // Draw each channel
+    waveformData.forEach((channelData, channelIndex) => {
+      if (!channelData || channelData.length === 0) return;
+
+      const color = getWaveformColor(channelIndex, isSelected);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+
+      // Calculate vertical scaling
+      const range = Math.max(Math.abs(bounds.min), Math.abs(bounds.max), 0.01);
+      const scale = (h / 2 - 2) / range; // Leave 2px padding
+
+      ctx.beginPath();
+      let isFirstPoint = true;
+
+      for (let i = 0; i < channelData.length; i++) {
+        const sample = channelData[i];
+        const pixelX = x + i * pixelsPerSample;
+        const pixelY = centerY - sample * scale;
+
+        // Skip drawing if off-screen left
+        if (pixelX < x) continue;
+        // Stop drawing if off-screen right
+        if (pixelX > x + w) break;
+
+        if (isFirstPoint) {
+          ctx.moveTo(pixelX, pixelY);
+          isFirstPoint = false;
+        } else {
+          ctx.lineTo(pixelX, pixelY);
+        }
+      }
+
+      ctx.stroke();
+    });
   };
 
   const drawMidiClip = (ctx: CanvasRenderingContext2D, clip: MidiClip, trackY: number) => {

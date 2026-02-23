@@ -18,6 +18,7 @@ export interface AudioAsset {
   url: string;
   duration: number; // seconds
   name: string;
+  waveformData?: Float32Array[]; // [left channel, right channel] - PCM samples
 }
 
 export interface AudioClip {
