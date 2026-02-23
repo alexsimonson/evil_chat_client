@@ -18,12 +18,15 @@ interface TimelineProps {
   onOpenMidiEditor: (clipId: string) => void;
   onSeek: (positionSeconds: number) => void;
   waveformDataMap?: Map<string, Float32Array[]>; // assetId -> waveform data
+  scrollContainerRef?: React.RefObject<HTMLDivElement>;
+  horizontalScrollRef?: React.RefObject<HTMLDivElement | null>;
+  verticalScrollRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 export function Timeline({
   state,
   playheadSeconds,
-  isPlaying,
+  isPlaying: _isPlaying,
   zoom,
   selectedClipId,
   onSelectClip,
@@ -32,6 +35,9 @@ export function Timeline({
   onOpenMidiEditor,
   onSeek,
   waveformDataMap,
+  scrollContainerRef,
+  horizontalScrollRef,
+  verticalScrollRef,
 }: TimelineProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [dragState, setDragState] = React.useState<{
@@ -41,15 +47,35 @@ export function Timeline({
     originalStart: number;
     tempStart: number; // Current position during drag (for visual feedback)
     draggingPlayhead: boolean;
-  }>({ clipId: null, type: null, startX: 0, originalStart: 0, tempStart: 0, draggingPlayhead: false });
+    draggingBackground: boolean;
+    scrollStartLeft: number;
+  }>({
+    clipId: null,
+    type: null,
+    startX: 0,
+    originalStart: 0,
+    tempStart: 0,
+    draggingPlayhead: false,
+    draggingBackground: false,
+    scrollStartLeft: 0,
+  });
 
   const tracks = state.trackOrder.map((id) => state.tracks[id]);
   const TRACK_HEIGHT = 80;
-  const HEADER_HEIGHT = 30;
 
   useEffect(() => {
     drawTimeline();
   }, [state, zoom, selectedClipId, playheadSeconds, waveformDataMap, dragState]);
+
+  const getScrollOffsets = () => {
+    const container = scrollContainerRef?.current ?? canvasRef.current?.parentElement;
+    return {
+      left: horizontalScrollRef?.current?.scrollLeft ?? container?.scrollLeft ?? 0,
+      top: verticalScrollRef?.current?.scrollTop ?? container?.scrollTop ?? 0,
+    };
+  };
+
+  const getScrollContainer = () => horizontalScrollRef?.current ?? scrollContainerRef?.current ?? canvasRef.current?.parentElement;
 
   const drawTimeline = () => {
     const canvas = canvasRef.current;
@@ -60,7 +86,7 @@ export function Timeline({
 
     const duration = 300; // Show 300 seconds (5 minutes) by default
     const width = Math.max(duration * zoom, canvas.clientWidth);
-    const height = tracks.length * TRACK_HEIGHT + HEADER_HEIGHT;
+    const height = tracks.length * TRACK_HEIGHT;
 
     canvas.width = width;
     canvas.height = height;
@@ -69,10 +95,7 @@ export function Timeline({
     ctx.fillStyle = '#1a1a1a';
     ctx.fillRect(0, 0, width, height);
 
-    // Draw time ruler
-    drawTimeRuler(ctx, width);
-
-    // Draw tracks
+    // Draw tracks (no time ruler - it's in the fixed header above)
     tracks.forEach((track, index) => {
       drawTrack(ctx, track, index);
     });
@@ -82,43 +105,13 @@ export function Timeline({
     ctx.strokeStyle = '#ff4a4a';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(playheadX, HEADER_HEIGHT);
+    ctx.moveTo(playheadX, 0);
     ctx.lineTo(playheadX, height);
     ctx.stroke();
   };
 
-  const drawTimeRuler = (ctx: CanvasRenderingContext2D, width: number) => {
-    ctx.fillStyle = '#2a2a2a';
-    ctx.fillRect(0, 0, width, HEADER_HEIGHT);
-
-    ctx.strokeStyle = '#444';
-    ctx.lineWidth = 1;
-    ctx.fillStyle = '#aaa';
-    ctx.font = '10px monospace';
-
-    // Draw second markers
-    const secondInterval = zoom; // pixels per second
-    for (let sec = 0; sec < width / zoom; sec++) {
-      const x = sec * secondInterval;
-      
-      // Major tick every 5 seconds
-      if (sec % 5 === 0) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, HEADER_HEIGHT);
-        ctx.stroke();
-        ctx.fillText(`${sec}s`, x + 2, 12);
-      } else {
-        ctx.beginPath();
-        ctx.moveTo(x, HEADER_HEIGHT - 5);
-        ctx.lineTo(x, HEADER_HEIGHT);
-        ctx.stroke();
-      }
-    }
-  };
-
   const drawTrack = (ctx: CanvasRenderingContext2D, track: Track, index: number) => {
-    const y = HEADER_HEIGHT + index * TRACK_HEIGHT;
+    const y = index * TRACK_HEIGHT;
 
     // Track background
     ctx.fillStyle = index % 2 === 0 ? '#1e1e1e' : '#222';
@@ -289,26 +282,9 @@ export function Timeline({
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left + canvas.parentElement!.scrollLeft;
-    const y = e.clientY - rect.top + canvas.parentElement!.scrollTop;
-
-    // Check if clicking in the header (ruler area)
-    if (y < HEADER_HEIGHT) {
-      // Clicking on the ruler - seek or drag playhead
-      const clickTime = x / zoom;
-      onSeek(Math.max(0, clickTime));
-      
-      // Allow dragging the playhead from the ruler area
-      setDragState({
-        clipId: null,
-        type: null,
-        startX: x,
-        originalStart: playheadSeconds,
-        tempStart: playheadSeconds,
-        draggingPlayhead: true,
-      });
-      return;
-    }
+    const scroll = getScrollOffsets();
+    const x = e.clientX - rect.left + scroll.left;
+    const y = e.clientY - rect.top + scroll.top;
 
     // Check playhead click tolerance (5 pixels on either side)
     const playheadX = playheadSeconds * zoom;
@@ -321,12 +297,14 @@ export function Timeline({
         originalStart: playheadSeconds,
         tempStart: playheadSeconds,
         draggingPlayhead: true,
+        draggingBackground: false,
+        scrollStartLeft: 0,
       });
       return;
     }
 
     // Check if clicking on a clip
-    const trackIndex = Math.floor((y - HEADER_HEIGHT) / TRACK_HEIGHT);
+    const trackIndex = Math.floor(y / TRACK_HEIGHT);
     if (trackIndex < 0 || trackIndex >= tracks.length) return;
 
     const track = tracks[trackIndex];
@@ -338,7 +316,17 @@ export function Timeline({
       );
       if (clip) {
         onSelectClip(clip.id, 'audio');
-        setDragState({ clipId: clip.id, type: 'audio', startX: x, originalStart: clip.start, tempStart: clip.start, draggingPlayhead: false });
+        setDragState({
+          clipId: clip.id,
+          type: 'audio',
+          startX: x,
+          originalStart: clip.start,
+          tempStart: clip.start,
+          draggingPlayhead: false,
+          draggingBackground: false,
+          scrollStartLeft: 0,
+        });
+        return;
       }
     } else if (track.type === 'midi') {
       const clip = Object.values(state.midiClips).find(
@@ -346,8 +334,33 @@ export function Timeline({
       );
       if (clip) {
         onSelectClip(clip.id, 'midi');
-        setDragState({ clipId: clip.id, type: 'midi', startX: x, originalStart: clip.start, tempStart: clip.start, draggingPlayhead: false });
+        setDragState({
+          clipId: clip.id,
+          type: 'midi',
+          startX: x,
+          originalStart: clip.start,
+          tempStart: clip.start,
+          draggingPlayhead: false,
+          draggingBackground: false,
+          scrollStartLeft: 0,
+        });
+        return;
       }
+    }
+
+    // Background drag to pan timeline
+    const container = getScrollContainer();
+    if (container) {
+      setDragState({
+        clipId: null,
+        type: null,
+        startX: x,
+        originalStart: 0,
+        tempStart: 0,
+        draggingPlayhead: false,
+        draggingBackground: true,
+        scrollStartLeft: container.scrollLeft,
+      });
     }
   };
 
@@ -356,13 +369,24 @@ export function Timeline({
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left + canvas.parentElement!.scrollLeft;
+    const scroll = getScrollOffsets();
+    const x = e.clientX - rect.left + scroll.left;
 
     // Handle playhead dragging
     if (dragState.draggingPlayhead) {
       const deltaTime = (x - dragState.startX) / zoom;
       const newPosition = Math.max(0, dragState.originalStart + deltaTime);
       onSeek(newPosition);
+      return;
+    }
+
+    // Handle background drag for panning
+    if (dragState.draggingBackground) {
+      const container = getScrollContainer();
+      if (container) {
+        const deltaX = x - dragState.startX;
+        container.scrollLeft = Math.max(0, dragState.scrollStartLeft - deltaX);
+      }
       return;
     }
 
@@ -390,7 +414,16 @@ export function Timeline({
       }
     }
 
-    setDragState({ clipId: null, type: null, startX: 0, originalStart: 0, tempStart: 0, draggingPlayhead: false });
+    setDragState({
+      clipId: null,
+      type: null,
+      startX: 0,
+      originalStart: 0,
+      tempStart: 0,
+      draggingPlayhead: false,
+      draggingBackground: false,
+      scrollStartLeft: 0,
+    });
   };
 
   // Helper to get coordinates from mouse or touch events
@@ -414,8 +447,8 @@ export function Timeline({
     }
 
     return {
-      x: clientX - rect.left + canvas.parentElement!.scrollLeft,
-      y: clientY - rect.top + canvas.parentElement!.scrollTop,
+      x: clientX - rect.left + getScrollOffsets().left,
+      y: clientY - rect.top + getScrollOffsets().top,
     };
   };
 
@@ -433,7 +466,7 @@ export function Timeline({
     if (!coords) return;
     
     // Prevent default scrolling behavior when dragging a clip
-    if (dragState.clipId || dragState.draggingPlayhead) {
+    if (dragState.clipId || dragState.draggingPlayhead || dragState.draggingBackground) {
       e.preventDefault();
     }
 
@@ -444,6 +477,16 @@ export function Timeline({
       const deltaTime = (x - dragState.startX) / zoom;
       const newPosition = Math.max(0, dragState.originalStart + deltaTime);
       onSeek(newPosition);
+      return;
+    }
+
+    // Handle background drag for panning
+    if (dragState.draggingBackground) {
+      const container = getScrollContainer();
+      if (container) {
+        const deltaX = x - dragState.startX;
+        container.scrollLeft = Math.max(0, dragState.scrollStartLeft - deltaX);
+      }
       return;
     }
 
@@ -470,7 +513,16 @@ export function Timeline({
       }
     }
 
-    setDragState({ clipId: null, type: null, startX: 0, originalStart: 0, tempStart: 0, draggingPlayhead: false });
+    setDragState({
+      clipId: null,
+      type: null,
+      startX: 0,
+      originalStart: 0,
+      tempStart: 0,
+      draggingPlayhead: false,
+      draggingBackground: false,
+      scrollStartLeft: 0,
+    });
   };
 
   const handleDoubleClick = (_e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -483,7 +535,7 @@ export function Timeline({
   };
 
   return (
-    <div style={{ flex: 1, overflow: 'auto', position: 'relative', touchAction: 'none' }}>
+    <div style={{ flex: 1, position: 'relative', touchAction: 'none', overflow: 'hidden' }}>
       <canvas
         ref={canvasRef}
         onMouseDown={handleMouseDown}
@@ -495,7 +547,7 @@ export function Timeline({
         onTouchEnd={handleTouchEnd}
         onDoubleClick={handleDoubleClick}
         style={{
-          cursor: dragState.draggingPlayhead ? 'grabbing' : dragState.clipId ? 'grabbing' : 'default',
+          cursor: dragState.draggingPlayhead || dragState.clipId || dragState.draggingBackground ? 'grabbing' : 'grab',
           display: 'block'
         }}
       />

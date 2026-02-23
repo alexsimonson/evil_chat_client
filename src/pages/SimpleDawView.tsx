@@ -38,10 +38,9 @@ export function SimpleDawView() {
   const recordingFunctionsRef = useRef<{ start: () => Promise<void>; stop: () => void } | null>(null);
   const dawStateRef = useRef<DawState | null>(null); // Keep current state for recording functions
   const localUIStateRef = useRef(localUIState); // Keep current local UI state for recording functions
-  const trackListContainerRef = useRef<HTMLDivElement>(null);
-  const timelineContainerRef = useRef<HTMLCanvasElement>(null);
-  const mainContentRef = useRef<HTMLDivElement>(null); // Main scrollable container for syncing header
-  const headerRulerRef = useRef<HTMLDivElement>(null); // Header SVG container for scroll sync
+  const mainContentRef = useRef<HTMLDivElement>(null); // Main vertical scroll container for tracks
+  const timelineScrollRef = useRef<HTMLDivElement>(null); // Horizontal scroll container for right panel
+  const rulerDragRef = useRef({ isDragging: false, startX: 0, startScrollLeft: 0 });
   const seekTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // For debouncing seek operations during drag
   const pendingSeekRef = useRef<number | null>(null); // Track the latest pending seek position
 
@@ -451,19 +450,26 @@ export function SimpleDawView() {
     return () => clearInterval(interval);
   }, [localUIState.isPlaying]);
 
-  // Sync header SVG scroll with main content scroll
-  useEffect(() => {
-    const mainContent = mainContentRef.current;
-    const headerRuler = headerRulerRef.current;
-    if (!mainContent || !headerRuler) return;
-
-    const handleScroll = () => {
-      // Apply horizontal scroll to the header ruler SVG container
-      headerRuler.scrollLeft = mainContent.scrollLeft;
+  const handleRulerMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const target = timelineScrollRef.current;
+    if (!target) return;
+    rulerDragRef.current = {
+      isDragging: true,
+      startX: event.clientX,
+      startScrollLeft: target.scrollLeft,
     };
+  }, []);
 
-    mainContent.addEventListener('scroll', handleScroll);
-    return () => mainContent.removeEventListener('scroll', handleScroll);
+  const handleRulerMouseMove = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (!rulerDragRef.current.isDragging) return;
+    const target = timelineScrollRef.current;
+    if (!target) return;
+    const deltaX = event.clientX - rulerDragRef.current.startX;
+    target.scrollLeft = Math.max(0, rulerDragRef.current.startScrollLeft - deltaX);
+  }, []);
+
+  const handleRulerMouseUp = useCallback(() => {
+    rulerDragRef.current.isDragging = false;
   }, []);
 
   // Extract waveforms from audio assets
@@ -877,138 +883,168 @@ export function SimpleDawView() {
         </span>
       </div>
 
-      {/* Header row - spans full width with fixed left panel and scrollable right */}
-      <div style={{ display: 'flex', height: `${HEADER_HEIGHT}px`, background: '#2a2a2a', borderBottom: '1px solid #444', flexShrink: 0, zIndex: 5 }}>
-        {/* Left header - add track buttons */}
-        <div style={{ width: '250px', flexShrink: 0, display: 'flex', gap: '8px', alignItems: 'center', paddingLeft: '10px', borderRight: '1px solid #444' }}>
-          <button
-            onClick={() => handleAddTrack('audio')}
-            style={{
-              padding: '4px 10px',
-              background: '#4a9eff',
-              border: 'none',
-              borderRadius: '3px',
-              color: '#fff',
-              cursor: 'pointer',
-              fontSize: '12px',
-              fontWeight: 'bold',
-            }}
-            title="Add audio track"
-          >
-            + Audio
-          </button>
-          <button
-            onClick={() => handleAddTrack('midi')}
-            style={{
-              padding: '4px 10px',
-              background: '#9e4aff',
-              border: 'none',
-              borderRadius: '3px',
-              color: '#fff',
-              cursor: 'pointer',
-              fontSize: '12px',
-              fontWeight: 'bold',
-            }}
-            title="Add MIDI track"
-          >
-            + MIDI
-          </button>
+      {/* Main content - track list and right-side scrollbox */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', background: '#1a1a1a', border: '1px solid #444' }}>
+        <div ref={mainContentRef} style={{ flex: 1, display: 'flex', overflowY: 'auto', overflowX: 'hidden' }}>
+          {/* Track list - left panel */}
+          <div style={{ width: '250px', flexShrink: 0, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 2, background: '#252525', borderRight: '1px solid #555' }}>
+            <div
+              style={{
+                height: `${HEADER_HEIGHT}px`,
+                background: '#2a2a2a',
+                borderBottom: '1px solid #444',
+                display: 'flex',
+                gap: '8px',
+                alignItems: 'center',
+                paddingLeft: '10px',
+                position: 'sticky',
+                top: 0,
+                zIndex: 5,
+              }}
+            >
+              <button
+                onClick={() => handleAddTrack('audio')}
+                style={{
+                  padding: '4px 10px',
+                  background: '#4a9eff',
+                  border: 'none',
+                  borderRadius: '3px',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                }}
+                title="Add audio track"
+              >
+                + Audio
+              </button>
+              <button
+                onClick={() => handleAddTrack('midi')}
+                style={{
+                  padding: '4px 10px',
+                  background: '#9e4aff',
+                  border: 'none',
+                  borderRadius: '3px',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                }}
+                title="Add MIDI track"
+              >
+                + MIDI
+              </button>
+            </div>
+
+            <TrackList
+              tracks={tracks}
+              selectedTrackId={uiState.selectedTrackId}
+              armedTrackIds={localUIState.armedTrackIds}
+              mutedTrackIds={localUIState.muteTrackIds}
+              soloedTrackIds={localUIState.soloTrackIds}
+              onSelectTrack={(id) => setUiState({ ...uiState, selectedTrackId: id })}
+              onAddTrack={handleAddTrack}
+              onRemoveTrack={handleRemoveTrack}
+              onRenameTrack={handleRenameTrack}
+              onSetVolume={handleSetVolume}
+              onSetMute={handleSetMute}
+              onSetSolo={handleSetSolo}
+              onSetArm={handleSetArm}
+            />
+          </div>
+
+          {/* Right side - single horizontal scrollbox */}
+          <div ref={timelineScrollRef} className="timeline-scroll" style={{ flex: 1, minWidth: 0, overflowX: 'auto', overflowY: 'hidden', position: 'relative', zIndex: 1, background: '#1a1a1a' }}>
+            <div
+              style={{
+                height: `${HEADER_HEIGHT}px`,
+                background: '#2a2a2a',
+                borderBottom: '1px solid #444',
+                display: 'flex',
+                alignItems: 'center',
+                position: 'sticky',
+                top: 0,
+                zIndex: 5,
+                cursor: rulerDragRef.current.isDragging ? 'grabbing' : 'grab',
+              }}
+              onMouseDown={handleRulerMouseDown}
+              onMouseMove={handleRulerMouseMove}
+              onMouseUp={handleRulerMouseUp}
+              onMouseLeave={handleRulerMouseUp}
+            >
+              <svg
+                width={Math.max(300 * uiState.zoom, 1000)}
+                height={HEADER_HEIGHT}
+                style={{ display: 'block', flexShrink: 0 }}
+                viewBox={`0 0 ${Math.max(300 * uiState.zoom, 1000)} ${HEADER_HEIGHT}`}
+                preserveAspectRatio="none"
+              >
+                <rect x={0} y={0} width={Math.max(300 * uiState.zoom, 1000)} height={HEADER_HEIGHT} fill="#2a2a2a" />
+                {Array.from({ length: 301 }, (_, i) => {
+                  const x = i * uiState.zoom;
+                  const isMajor = i % 5 === 0;
+                  return (
+                    <g key={i}>
+                      <line
+                        x1={x}
+                        y1={isMajor ? 0 : HEADER_HEIGHT - 5}
+                        x2={x}
+                        y2={HEADER_HEIGHT}
+                        stroke="#444"
+                        strokeWidth={1}
+                      />
+                      {isMajor && (
+                        <text x={x + 2} y={12} fill="#aaa" fontSize="10" fontFamily="monospace">
+                          {i}s
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+
+            <div className="timeline-clip">
+              <Timeline
+                state={dawState}
+                playheadSeconds={localUIState.playheadSeconds}
+                isPlaying={localUIState.isPlaying}
+                zoom={uiState.zoom}
+                selectedClipId={uiState.selectedClipId}
+                waveformDataMap={waveformDataMap}
+                horizontalScrollRef={timelineScrollRef}
+                verticalScrollRef={mainContentRef}
+                onSelectClip={(id, type) => setUiState({ ...uiState, selectedClipId: id, selectedClipType: type })}
+                onAudioClipMove={(clipId, start) => {
+                  const op: DawOp = {
+                    id: generateId(),
+                    clientId,
+                    timestamp: Date.now(),
+                    baseVersion: dawState.version,
+                    type: 'AUDIO_CLIP_MOVE',
+                    clipId,
+                    start,
+                  };
+                  dispatchOp(op);
+                }}
+                onMidiClipMove={(clipId, start) => {
+                  const op: DawOp = {
+                    id: generateId(),
+                    clientId,
+                    timestamp: Date.now(),
+                    baseVersion: dawState.version,
+                    type: 'MIDI_CLIP_MOVE',
+                    clipId,
+                    start,
+                  };
+                  dispatchOp(op);
+                }}
+                onOpenMidiEditor={(clipId) => setUiState({ ...uiState, editingMidiClipId: clipId })}
+                onSeek={handleSeek}
+              />
+            </div>
+          </div>
         </div>
-
-        {/* Right header - time ruler SVG (needs horizontal scroll sync) */}
-        <div ref={headerRulerRef} style={{ flex: 1, overflow: 'auto', display: 'flex', alignItems: 'center' }}>
-          <svg
-            width={Math.max(300 * uiState.zoom, 1000)}
-            height={HEADER_HEIGHT}
-            style={{ display: 'block', flexShrink: 0 }}
-            viewBox={`0 0 ${Math.max(300 * uiState.zoom, 1000)} ${HEADER_HEIGHT}`}
-            preserveAspectRatio="none"
-          >
-            {/* Ruler background */}
-            <rect x={0} y={0} width={Math.max(300 * uiState.zoom, 1000)} height={HEADER_HEIGHT} fill="#2a2a2a" />
-            
-            {/* Time markers */}
-            {Array.from({ length: 301 }, (_, i) => {
-              const x = i * uiState.zoom;
-              const isMajor = i % 5 === 0;
-              return (
-                <g key={i}>
-                  <line
-                    x1={x}
-                    y1={isMajor ? 0 : HEADER_HEIGHT - 5}
-                    x2={x}
-                    y2={HEADER_HEIGHT}
-                    stroke="#444"
-                    strokeWidth={1}
-                  />
-                  {isMajor && (
-                    <text x={x + 2} y={12} fill="#aaa" fontSize="10" fontFamily="monospace">
-                      {i}s
-                    </text>
-                  )}
-                </g>
-              );
-            })}
-          </svg>
-        </div>
-      </div>
-
-      {/* Main content - track list and timeline */}
-      <div ref={mainContentRef} style={{ flex: 1, display: 'flex', overflow: 'auto', gap: 0 }}>
-        {/* Track list */}
-        <TrackList
-          ref={trackListContainerRef}
-          tracks={tracks}
-          selectedTrackId={uiState.selectedTrackId}
-          armedTrackIds={localUIState.armedTrackIds}
-          mutedTrackIds={localUIState.muteTrackIds}
-          soloedTrackIds={localUIState.soloTrackIds}
-          onSelectTrack={(id) => setUiState({ ...uiState, selectedTrackId: id })}
-          onAddTrack={handleAddTrack}
-          onRemoveTrack={handleRemoveTrack}
-          onRenameTrack={handleRenameTrack}
-          onSetVolume={handleSetVolume}
-          onSetMute={handleSetMute}
-          onSetSolo={handleSetSolo}
-          onSetArm={handleSetArm}
-        />
-
-        {/* Timeline */}
-        <Timeline
-          ref={timelineContainerRef}
-          state={dawState}
-          playheadSeconds={localUIState.playheadSeconds}
-          zoom={uiState.zoom}
-          selectedClipId={uiState.selectedClipId}
-          waveformDataMap={waveformDataMap}
-          onSelectClip={(id, type) => setUiState({ ...uiState, selectedClipId: id, selectedClipType: type })}
-          onAudioClipMove={(clipId, start) => {
-            const op: DawOp = {
-              id: generateId(),
-              clientId,
-              timestamp: Date.now(),
-              baseVersion: dawState.version,
-              type: 'AUDIO_CLIP_MOVE',
-              clipId,
-              start,
-            };
-            dispatchOp(op);
-          }}
-          onMidiClipMove={(clipId, start) => {
-            const op: DawOp = {
-              id: generateId(),
-              clientId,
-              timestamp: Date.now(),
-              baseVersion: dawState.version,
-              type: 'MIDI_CLIP_MOVE',
-              clipId,
-              start,
-            };
-            dispatchOp(op);
-          }}
-          onOpenMidiEditor={(clipId) => setUiState({ ...uiState, editingMidiClipId: clipId })}
-          onSeek={handleSeek}
-        />
       </div>
 
       {/* Piano roll (if MIDI clip is being edited) */}

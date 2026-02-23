@@ -28,7 +28,7 @@ export function TrackList({
   mutedTrackIds,
   soloedTrackIds,
   onSelectTrack,
-  onAddTrack,
+  onAddTrack: _onAddTrack,
   onRemoveTrack,
   onRenameTrack,
   onSetVolume,
@@ -56,65 +56,29 @@ export function TrackList({
       style={{
         width: '250px',
         background: '#252525',
-        borderRight: '1px solid #444',
+        borderRight: '1px solid #555',
         display: 'flex',
         flexDirection: 'column',
         color: '#fff',
+        flexShrink: 0,
       }}
     >
-      {/* Header */}
-      <div
-        style={{
-          padding: '10px',
-          background: '#2a2a2a',
-          borderBottom: '1px solid #444',
-          display: 'flex',
-          gap: '5px',
-        }}
-      >
-        <button
-          onClick={() => onAddTrack('audio')}
-          style={{
-            flex: 1,
-            padding: '6px',
-            background: '#4a9eff',
-            border: 'none',
-            borderRadius: '4px',
-            color: '#fff',
-            cursor: 'pointer',
-            fontSize: '12px',
-          }}
-        >
-          + Audio
-        </button>
-        <button
-          onClick={() => onAddTrack('midi')}
-          style={{
-            flex: 1,
-            padding: '6px',
-            background: '#9e4aff',
-            border: 'none',
-            borderRadius: '4px',
-            color: '#fff',
-            cursor: 'pointer',
-            fontSize: '12px',
-          }}
-        >
-          + MIDI
-        </button>
-      </div>
-
-      {/* Track list */}
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      {/* Track list - no header, buttons are in top header */}
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
         {tracks.map((track) => (
           <div
             key={track.id}
             onClick={() => onSelectTrack(track.id)}
             style={{
-              padding: '10px',
-              borderBottom: '1px solid #333',
-              background: track.id === selectedTrackId ? '#3a3a3a' : 'transparent',
+              padding: '8px',
+              height: '80px',
+              borderBottom: '1px solid #444',
+              background: track.id === selectedTrackId ? '#3a3a3a' : '#252525',
               cursor: 'pointer',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              boxSizing: 'border-box',
             }}
           >
             {/* Track name */}

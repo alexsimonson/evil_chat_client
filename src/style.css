@@ -48,6 +48,31 @@ body {
   user-select: text;
 }
 
+.timeline-ruler {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.timeline-ruler::-webkit-scrollbar {
+  display: none;
+}
+
+.timeline-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.timeline-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.timeline-clip {
+  position: relative;
+  overflow: hidden;
+  clip-path: inset(0);
+  isolation: isolate;
+}
+
 h1 {
   font-size: clamp(1.5em, 5vw, 3.2em);
   line-height: 1.1;
