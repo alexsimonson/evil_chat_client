@@ -2,7 +2,7 @@
  * DAW Project Page - collaborative timeline editor
  */
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useReducer } from 'react';
 import { Room } from 'livekit-client';
 import { applyOp } from '../daw/state/store';
 import { LiveKitSync } from '../daw/livekit/sync';
@@ -14,7 +14,9 @@ import { PianoRoll } from '../daw/midi/pianoRoll';
 import { fetchDawSnapshot, submitOps } from '../daw/api';
 import type { DawState, UiState } from '../daw/types';
 import { createEmptyDawState, createDefaultUiState } from '../daw/types';
+import { createInitialLocalUIState, applyLocalUIAction } from '../daw/state/localState';
 import type { DawOp } from '../daw/state/ops';
+import type { LocalUIAction } from '../daw/state/localState';
 
 interface ProjectDawPageProps {
   projectId: string;
@@ -27,6 +29,7 @@ const generateId = () => Math.random().toString(36).substring(2, 15);
 export function ProjectDawPage({ projectId, room }: ProjectDawPageProps) {
   const [dawState, setDawState] = useState<DawState>(createEmptyDawState(projectId));
   const [uiState, setUiState] = useState<UiState>(createDefaultUiState());
+  const [localUIState, dispatchLocalUI] = useReducer(applyLocalUIAction, createInitialLocalUIState());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -37,6 +40,7 @@ export function ProjectDawPage({ projectId, room }: ProjectDawPageProps) {
   const pendingOps = useRef<DawOp[]>([]);
   const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null); // For debouncing seek operations during drag
   const pendingSeekRef = useRef<number | null>(null); // Track the latest pending seek position
+  const localUIStateRef = useRef(localUIState); // Keep current local UI state for recording functions
 
   // Load initial state from server
   useEffect(() => {
@@ -66,28 +70,9 @@ export function ProjectDawPage({ projectId, room }: ProjectDawPageProps) {
     };
   }, [room, loading]);
 
-  // Position tick broadcast (if host)
-  useEffect(() => {
-    if (!syncRef.current || !syncRef.current.isTransportHost() || !dawState.transport.isPlaying) {
-      return;
-    }
+  // Position tick broadcast removed - playhead position is now client-specific
+  // Each client maintains their own playhead position locally
 
-    const interval = setInterval(() => {
-      const position = audioEngine.getPosition();
-      const tickOp: DawOp = {
-        id: generateId(),
-        clientId,
-        timestamp: Date.now(),
-        baseVersion: dawState.version,
-        type: 'TRANSPORT_POSITION_TICK',
-        positionSeconds: position,
-        hostClientId: clientId,
-      };
-      syncRef.current?.broadcastOp(tickOp);
-    }, 250);
-
-    return () => clearInterval(interval);
-  }, [dawState.transport.isPlaying, syncRef.current]);
 
   const loadInitialState = async () => {
     try {
@@ -102,6 +87,24 @@ export function ProjectDawPage({ projectId, room }: ProjectDawPageProps) {
   };
 
   const handleRemoteOp = useCallback((op: DawOp) => {
+    // Filter out obsolete client-specific operations from old sessions
+    const obsoleteOpTypes = new Set([
+      'TRANSPORT_PLAY',
+      'TRANSPORT_PAUSE',
+      'TRANSPORT_STOP',
+      'TRANSPORT_SEEK',
+      'TRANSPORT_POSITION_TICK',
+      'TRANSPORT_RECORD',
+      'TRACK_SET_ARM',
+      'TRACK_SET_MUTE',
+      'TRACK_SET_SOLO',
+    ]);
+
+    if (obsoleteOpTypes.has(op.type)) {
+      console.log(`[DAW] Skipping obsolete operation type: ${op.type}`);
+      return;
+    }
+
     setDawState((prev) => applyOp(prev, op));
   }, []);
 
@@ -130,47 +133,41 @@ export function ProjectDawPage({ projectId, room }: ProjectDawPageProps) {
     }, 1000);
   }, [projectId, dawState.version]);
 
-  // Transport controls
+  // Keep localUIState ref in sync so recording functions see current armed tracks
+  useEffect(() => {
+    localUIStateRef.current = localUIState;
+  }, [localUIState]);
+
+  // Sync playhead position from audio engine during playback
+  useEffect(() => {
+    if (!localUIState.isPlaying) return;
+
+    const interval = setInterval(() => {
+      const position = audioEngine.getPosition();
+      dispatchLocalUI({ type: 'SET_PLAYHEAD', playheadSeconds: position });
+    }, 50); // Update every 50ms for smooth playhead movement
+
+    return () => clearInterval(interval);
+  }, [localUIState.isPlaying]);
+
+  // Transport controls - now local only
   const handlePlay = useCallback(() => {
-    const op: DawOp = {
-      id: generateId(),
-      clientId,
-      timestamp: Date.now(),
-      baseVersion: dawState.version,
-      type: 'TRANSPORT_PLAY',
-      positionSeconds: dawState.transport.positionSeconds,
-      startedAtWallClock: Date.now(),
-      hostClientId: clientId,
-    };
-    dispatchOp(op);
-    audioEngine.start(dawState);
-  }, [dawState, dispatchOp]);
+    dispatchLocalUI({ type: 'SET_PLAYING', isPlaying: true });
+    audioEngine.start(dawState, localUIState.playheadSeconds);
+  }, [dawState, localUIState.playheadSeconds]);
 
   const handlePause = useCallback(() => {
     const position = audioEngine.getPosition();
-    const op: DawOp = {
-      id: generateId(),
-      clientId,
-      timestamp: Date.now(),
-      baseVersion: dawState.version,
-      type: 'TRANSPORT_PAUSE',
-      positionSeconds: position,
-    };
-    dispatchOp(op);
+    dispatchLocalUI({ type: 'SET_PLAYHEAD', playheadSeconds: position });
+    dispatchLocalUI({ type: 'SET_PLAYING', isPlaying: false });
     audioEngine.pause();
-  }, [dawState, dispatchOp]);
+  }, []);
 
   const handleStop = useCallback(() => {
-    const op: DawOp = {
-      id: generateId(),
-      clientId,
-      timestamp: Date.now(),
-      baseVersion: dawState.version,
-      type: 'TRANSPORT_STOP',
-    };
-    dispatchOp(op);
+    dispatchLocalUI({ type: 'SET_PLAYHEAD', playheadSeconds: 0 });
+    dispatchLocalUI({ type: 'SET_PLAYING', isPlaying: false });
     audioEngine.stop();
-  }, [dawState, dispatchOp]);
+  }, []);
 
   const handleSeek = useCallback((seconds: number) => {
     // Store the pending seek position
@@ -181,23 +178,15 @@ export function ProjectDawPage({ projectId, room }: ProjectDawPageProps) {
       clearTimeout(seekTimeoutRef.current);
     }
 
-    // Set a new debounce timer - sends seek operation after 50ms of no new seeks
+    // Set a new debounce timer - updates local playhead position after 50ms of no new seeks
     seekTimeoutRef.current = setTimeout(() => {
       const seekPosition = pendingSeekRef.current ?? seconds;
-      const op: DawOp = {
-        id: generateId(),
-        clientId,
-        timestamp: Date.now(),
-        baseVersion: dawState.version,
-        type: 'TRANSPORT_SEEK',
-        positionSeconds: seekPosition,
-      };
-      dispatchOp(op);
+      dispatchLocalUI({ type: 'SET_PLAYHEAD', playheadSeconds: seekPosition });
       audioEngine.seek(seekPosition);
       seekTimeoutRef.current = null;
       pendingSeekRef.current = null;
     }, 50); // Debounce for 50ms - batches rapid seeks from dragging
-  }, [dawState, dispatchOp]);
+  }, []);
 
   const handleSetBpm = useCallback((bpm: number) => {
     const op: DawOp = {
@@ -268,56 +257,21 @@ export function ProjectDawPage({ projectId, room }: ProjectDawPageProps) {
   }, [dawState, dispatchOp]);
 
   const handleSetMute = useCallback((trackId: string, mute: boolean) => {
-    const op: DawOp = {
-      id: generateId(),
-      clientId,
-      timestamp: Date.now(),
-      baseVersion: dawState.version,
-      type: 'TRACK_SET_MUTE',
-      trackId,
-      mute,
-    };
-    dispatchOp(op);
-  }, [dawState, dispatchOp]);
+    dispatchLocalUI({ type: 'SET_LOCAL_MUTE', trackId, muted: mute });
+  }, []);
 
   const handleSetSolo = useCallback((trackId: string, solo: boolean) => {
-    const op: DawOp = {
-      id: generateId(),
-      clientId,
-      timestamp: Date.now(),
-      baseVersion: dawState.version,
-      type: 'TRACK_SET_SOLO',
-      trackId,
-      solo,
-    };
-    dispatchOp(op);
-  }, [dawState, dispatchOp]);
+    dispatchLocalUI({ type: 'SET_LOCAL_SOLO', trackId, soloed: solo });
+  }, []);
 
   const handleSetArm = useCallback((trackId: string, armed: boolean) => {
-    const op: DawOp = {
-      id: generateId(),
-      clientId,
-      timestamp: Date.now(),
-      baseVersion: dawState.version,
-      type: 'TRACK_SET_ARM',
-      trackId,
-      armed,
-    };
-    dispatchOp(op);
-  }, [dawState, dispatchOp]);
+    dispatchLocalUI({ type: 'SET_ARMED_TRACK', trackId, armed });
+  }, []);
 
   const handleRecord = useCallback(() => {
-    const newRecordingState = !dawState.transport.isRecording;
-    const op: DawOp = {
-      id: generateId(),
-      clientId,
-      timestamp: Date.now(),
-      baseVersion: dawState.version,
-      type: 'TRANSPORT_RECORD',
-      isRecording: newRecordingState,
-    };
-    dispatchOp(op);
-  }, [dawState, dispatchOp]);
+    const newRecordingState = !localUIState.isRecording;
+    dispatchLocalUI({ type: 'SET_RECORDING', isRecording: newRecordingState });
+  }, [localUIState.isRecording]);
 
   const handleReset = useCallback(() => {
     const op: DawOp = {
@@ -417,7 +371,10 @@ export function ProjectDawPage({ projectId, room }: ProjectDawPageProps) {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#1a1a1a' }}>
       {/* Transport bar */}
       <TransportBar
-        transport={dawState.transport}
+        playheadSeconds={localUIState.playheadSeconds}
+        isPlaying={localUIState.isPlaying}
+        isRecording={localUIState.isRecording}
+        bpm={dawState.transport.bpm}
         onPlay={handlePlay}
         onPause={handlePause}
         onStop={handleStop}
@@ -433,6 +390,9 @@ export function ProjectDawPage({ projectId, room }: ProjectDawPageProps) {
         <TrackList
           tracks={tracks}
           selectedTrackId={uiState.selectedTrackId}
+          armedTrackIds={localUIState.armedTrackIds}
+          mutedTrackIds={localUIState.muteTrackIds}
+          soloedTrackIds={localUIState.soloTrackIds}
           onSelectTrack={(id) => setUiState({ ...uiState, selectedTrackId: id })}
           onAddTrack={handleAddTrack}
           onRemoveTrack={handleRemoveTrack}
@@ -446,6 +406,8 @@ export function ProjectDawPage({ projectId, room }: ProjectDawPageProps) {
         {/* Timeline */}
         <Timeline
           state={dawState}
+          playheadSeconds={localUIState.playheadSeconds}
+          isPlaying={localUIState.isPlaying}
           zoom={uiState.zoom}
           selectedClipId={uiState.selectedClipId}
           onSelectClip={(id, type) => setUiState({ ...uiState, selectedClipId: id, selectedClipType: type })}

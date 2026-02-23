@@ -7,6 +7,8 @@ import type { DawState, AudioClip, MidiClip, Track } from '../types';
 
 interface TimelineProps {
   state: DawState;
+  playheadSeconds: number;
+  isPlaying: boolean;
   zoom: number; // pixels per second
   selectedClipId: string | null;
   onSelectClip: (clipId: string, type: 'audio' | 'midi') => void;
@@ -18,6 +20,8 @@ interface TimelineProps {
 
 export function Timeline({
   state,
+  playheadSeconds,
+  isPlaying,
   zoom,
   selectedClipId,
   onSelectClip,
@@ -34,40 +38,14 @@ export function Timeline({
     originalStart: number;
     draggingPlayhead: boolean;
   }>({ clipId: null, type: null, startX: 0, originalStart: 0, draggingPlayhead: false });
-  const [playheadPosition, setPlayheadPosition] = React.useState(state.transport.positionSeconds);
 
   const tracks = state.trackOrder.map((id) => state.tracks[id]);
   const TRACK_HEIGHT = 80;
   const HEADER_HEIGHT = 30;
 
-  // Update playhead position during playback or when state changes
-  useEffect(() => {
-    if (!state.transport.isPlaying || !state.transport.startedAtWallClock) {
-      // Not playing, use the state position
-      setPlayheadPosition(state.transport.positionSeconds);
-      return;
-    }
-
-    // Set up animation frame loop for smooth playhead movement during playback
-    let animationFrameId: number;
-
-    const updatePlayheadPosition = () => {
-      const elapsed = (Date.now() - state.transport.startedAtWallClock!) / 1000;
-      const currentPosition = state.transport.positionSeconds + elapsed;
-      setPlayheadPosition(currentPosition);
-      animationFrameId = requestAnimationFrame(updatePlayheadPosition);
-    };
-
-    animationFrameId = requestAnimationFrame(updatePlayheadPosition);
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-    };
-  }, [state.transport.isPlaying, state.transport.positionSeconds, state.transport.startedAtWallClock]);
-
   useEffect(() => {
     drawTimeline();
-  }, [state, zoom, selectedClipId, playheadPosition]);
+  }, [state, zoom, selectedClipId, playheadSeconds]);
 
   const drawTimeline = () => {
     const canvas = canvasRef.current;
@@ -96,7 +74,7 @@ export function Timeline({
     });
 
     // Draw playhead
-    const playheadX = playheadPosition * zoom;
+    const playheadX = playheadSeconds * zoom;
     ctx.strokeStyle = '#ff4a4a';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -257,21 +235,21 @@ export function Timeline({
         clipId: null,
         type: null,
         startX: x,
-        originalStart: playheadPosition,
+        originalStart: playheadSeconds,
         draggingPlayhead: true,
       });
       return;
     }
 
     // Check playhead click tolerance (5 pixels on either side)
-    const playheadX = playheadPosition * zoom;
+    const playheadX = playheadSeconds * zoom;
     if (Math.abs(x - playheadX) < 10) {
       // Clicked on playhead - start dragging it
       setDragState({
         clipId: null,
         type: null,
         startX: x,
-        originalStart: playheadPosition,
+        originalStart: playheadSeconds,
         draggingPlayhead: true,
       });
       return;

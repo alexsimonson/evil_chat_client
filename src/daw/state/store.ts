@@ -20,9 +20,6 @@ export function applyOp(state: DawState, op: DawOp): DawState {
         id: op.trackId,
         type: op.trackType,
         name: op.name,
-        mute: false,
-        solo: false,
-        armed: false,
         volume: 0.8,
         sortOrder: op.sortOrder,
       };
@@ -61,36 +58,6 @@ export function applyOp(state: DawState, op: DawOp): DawState {
         newState.tracks = {
           ...newState.tracks,
           [op.trackId]: { ...newState.tracks[op.trackId], volume: op.volume },
-        };
-      }
-      break;
-    }
-
-    case 'TRACK_SET_MUTE': {
-      if (newState.tracks[op.trackId]) {
-        newState.tracks = {
-          ...newState.tracks,
-          [op.trackId]: { ...newState.tracks[op.trackId], mute: op.mute },
-        };
-      }
-      break;
-    }
-
-    case 'TRACK_SET_SOLO': {
-      if (newState.tracks[op.trackId]) {
-        newState.tracks = {
-          ...newState.tracks,
-          [op.trackId]: { ...newState.tracks[op.trackId], solo: op.solo },
-        };
-      }
-      break;
-    }
-
-    case 'TRACK_SET_ARM': {
-      if (newState.tracks[op.trackId]) {
-        newState.tracks = {
-          ...newState.tracks,
-          [op.trackId]: { ...newState.tracks[op.trackId], armed: op.armed },
         };
       }
       break;
@@ -274,64 +241,6 @@ export function applyOp(state: DawState, op: DawOp): DawState {
       break;
     }
 
-    case 'TRANSPORT_PLAY': {
-      newState.transport = {
-        ...newState.transport,
-        isPlaying: true,
-        positionSeconds: op.positionSeconds,
-        startedAtWallClock: op.startedAtWallClock,
-        hostClientId: op.hostClientId,
-      };
-      break;
-    }
-
-    case 'TRANSPORT_PAUSE': {
-      newState.transport = {
-        ...newState.transport,
-        isPlaying: false,
-        positionSeconds: op.positionSeconds,
-        startedAtWallClock: undefined,
-      };
-      break;
-    }
-
-    case 'TRANSPORT_STOP': {
-      newState.transport = {
-        ...newState.transport,
-        isPlaying: false,
-        positionSeconds: 0,
-        startedAtWallClock: undefined,
-      };
-      break;
-    }
-
-    case 'TRANSPORT_SEEK': {
-      newState.transport = {
-        ...newState.transport,
-        positionSeconds: op.positionSeconds,
-      };
-      break;
-    }
-
-    case 'TRANSPORT_POSITION_TICK': {
-      // Only update if from current host
-      if (newState.transport.hostClientId === op.hostClientId) {
-        newState.transport = {
-          ...newState.transport,
-          positionSeconds: op.positionSeconds,
-        };
-      }
-      break;
-    }
-
-    case 'TRANSPORT_RECORD': {
-      newState.transport = {
-        ...newState.transport,
-        isRecording: op.isRecording,
-      };
-      break;
-    }
-
     case 'PROJECT_RESET': {
       // Reset to fresh empty state, preserving projectId
       return {
@@ -344,9 +253,6 @@ export function applyOp(state: DawState, op: DawOp): DawState {
         trackOrder: [],
         transport: {
           bpm: 120,
-          isPlaying: false,
-          isRecording: false,
-          positionSeconds: 0,
         },
       };
     }
@@ -358,10 +264,8 @@ export function applyOp(state: DawState, op: DawOp): DawState {
     }
   }
 
-  // Increment version for non-tick operations (ticks don't increment version)
-  if (op.type !== 'TRANSPORT_POSITION_TICK') {
-    newState.version = op.baseVersion + 1;
-  }
+  // Increment version
+  newState.version = op.baseVersion + 1;
 
   return newState;
 }

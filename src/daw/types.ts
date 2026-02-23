@@ -8,10 +8,7 @@ export interface Track {
   id: string;
   type: TrackType;
   name: string;
-  mute: boolean;
-  solo: boolean;
   volume: number; // 0-1
-  armed: boolean; // ready for recording
   sortOrder: number;
 }
 
@@ -51,11 +48,6 @@ export interface MidiClip {
 
 export interface Transport {
   bpm: number;
-  isPlaying: boolean;
-  isRecording: boolean;
-  positionSeconds: number;
-  startedAtWallClock?: number; // timestamp when playback started
-  hostClientId?: string; // who is the authoritative transport host
 }
 
 export interface DawState {
@@ -90,9 +82,6 @@ export function createEmptyDawState(projectId: string): DawState {
     trackOrder: [],
     transport: {
       bpm: 120,
-      isPlaying: false,
-      isRecording: false,
-      positionSeconds: 0,
     },
   };
 }

@@ -2,11 +2,11 @@
  * Transport bar component - playback controls
  */
 
-
-import type { Transport } from '../types';
-
 interface TransportBarProps {
-  transport: Transport;
+  playheadSeconds: number;
+  isPlaying: boolean;
+  isRecording: boolean;
+  bpm: number;
   onPlay: () => void;
   onPause: () => void;
   onStop: () => void;
@@ -17,7 +17,10 @@ interface TransportBarProps {
 }
 
 export function TransportBar({
-  transport,
+  playheadSeconds,
+  isPlaying,
+  isRecording,
+  bpm,
   onPlay,
   onPause,
   onStop,
@@ -47,7 +50,7 @@ export function TransportBar({
     >
       {/* Play/Pause/Stop buttons */}
       <div style={{ display: 'flex', gap: '5px' }}>
-        {!transport.isPlaying ? (
+        {!isPlaying ? (
           <button
             onClick={onPlay}
             style={{
@@ -95,12 +98,12 @@ export function TransportBar({
           onClick={onRecord}
           style={{
             padding: '8px 16px',
-            background: transport.isRecording ? '#ff4a4a' : '#555',
-            border: transport.isRecording ? '2px solid #fff' : 'none',
+            background: isRecording ? '#ff4a4a' : '#555',
+            border: isRecording ? '2px solid #fff' : 'none',
             borderRadius: '4px',
             color: '#fff',
             cursor: 'pointer',
-            fontWeight: transport.isRecording ? 'bold' : 'normal',
+            fontWeight: isRecording ? 'bold' : 'normal',
           }}
           title="Toggle recording"
         >
@@ -136,7 +139,7 @@ export function TransportBar({
           fontSize: '14px',
         }}
       >
-        {formatTime(transport.positionSeconds)}
+        {formatTime(playheadSeconds)}
       </div>
 
       {/* BPM control */}
@@ -144,7 +147,7 @@ export function TransportBar({
         <label style={{ fontSize: '12px', color: '#aaa' }}>BPM:</label>
         <input
           type="number"
-          value={transport.bpm}
+          value={bpm}
           onChange={(e) => onSetBpm(Number(e.target.value))}
           min={20}
           max={300}
@@ -160,25 +163,6 @@ export function TransportBar({
         />
       </div>
 
-      {/* Seek bar */}
-      <div style={{ flex: 1, padding: '0 20px' }}>
-        <input
-          type="range"
-          min={0}
-          max={300}
-          step={0.1}
-          value={transport.positionSeconds}
-          onChange={(e) => onSeek(Number(e.target.value))}
-          style={{ width: '100%' }}
-        />
-      </div>
-
-      {/* Host indicator (for debugging) */}
-      {transport.hostClientId && (
-        <div style={{ fontSize: '10px', color: '#666' }}>
-          Host: {transport.hostClientId.substring(0, 8)}...
-        </div>
-      )}
     </div>
   );
 }

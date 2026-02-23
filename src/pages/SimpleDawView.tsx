@@ -2,7 +2,7 @@
  * Simple DAW View - directly accessible, shared project
  */
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useReducer } from 'react';
 import { Room } from 'livekit-client';
 import { applyOp } from '../daw/state/store';
 import { getAudioEngine } from '../daw/audio/audioEngine';
@@ -14,7 +14,9 @@ import { Timeline } from '../daw/components/Timeline';
 import { PianoRoll } from '../daw/midi/pianoRoll';
 import type { DawState, UiState } from '../daw/types';
 import { createEmptyDawState, createDefaultUiState } from '../daw/types';
+import { createInitialLocalUIState, applyLocalUIAction } from '../daw/state/localState';
 import type { DawOp } from '../daw/state/ops';
+import type { LocalUIAction } from '../daw/state/localState';
 
 const generateId = () => Math.random().toString(36).substring(2, 15);
 const API_URL = import.meta.env.VITE_API_URL as string;
@@ -22,6 +24,7 @@ const API_URL = import.meta.env.VITE_API_URL as string;
 export function SimpleDawView() {
   const [dawState, setDawState] = useState<DawState>(createEmptyDawState('shared-project'));
   const [uiState, setUiState] = useState<UiState>(createDefaultUiState());
+  const [localUIState, dispatchLocalUI] = useReducer(applyLocalUIAction, createInitialLocalUIState());
   const [room, setRoom] = useState<Room | null>(null);
   const [isConnecting, setIsConnecting] = useState(true);
   const [connectionError, setConnectionError] = useState<string | null>(null);
@@ -33,6 +36,7 @@ export function SimpleDawView() {
   const livekitSyncRef = useRef<LiveKitSync | null>(null);
   const recordingFunctionsRef = useRef<{ start: () => Promise<void>; stop: () => void } | null>(null);
   const dawStateRef = useRef<DawState | null>(null); // Keep current state for recording functions
+  const localUIStateRef = useRef(localUIState); // Keep current local UI state for recording functions
   const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null); // For debouncing seek operations during drag
   const pendingSeekRef = useRef<number | null>(null); // Track the latest pending seek position
 
@@ -76,10 +80,26 @@ export function SimpleDawView() {
         const { operations } = await res.json();
         console.log(`[DAW] Loaded ${operations.length} operations from server`);
 
-        // Replay all operations to build initial state
+        // Filter out obsolete client-specific operations from old sessions
+        const obsoleteOpTypes = new Set([
+          'TRANSPORT_PLAY',
+          'TRANSPORT_PAUSE',
+          'TRANSPORT_STOP',
+          'TRANSPORT_SEEK',
+          'TRANSPORT_POSITION_TICK',
+          'TRANSPORT_RECORD',
+          'TRACK_SET_ARM',
+          'TRACK_SET_MUTE',
+          'TRACK_SET_SOLO',
+        ]);
+
+        const validOperations = operations.filter(op => !obsoleteOpTypes.has(op.type));
+        console.log(`[DAW] Filtered to ${validOperations.length} valid operations (skipped ${operations.length - validOperations.length} obsolete ops)`);
+
+        // Replay all valid operations to build initial state
         setDawState((prev) => {
           let state = prev;
-          for (const op of operations) {
+          for (const op of validOperations) {
             state = applyOp(state, op);
           }
           return state;
@@ -147,6 +167,24 @@ export function SimpleDawView() {
       room,
       clientId,
       onOpReceived: (op: DawOp) => {
+        // Filter out obsolete client-specific operations from old sessions
+        const obsoleteOpTypes = new Set([
+          'TRANSPORT_PLAY',
+          'TRANSPORT_PAUSE',
+          'TRANSPORT_STOP',
+          'TRANSPORT_SEEK',
+          'TRANSPORT_POSITION_TICK',
+          'TRANSPORT_RECORD',
+          'TRACK_SET_ARM',
+          'TRACK_SET_MUTE',
+          'TRACK_SET_SOLO',
+        ]);
+
+        if (obsoleteOpTypes.has(op.type)) {
+          console.log('[DAW] Skipping obsolete operation type:', op.type);
+          return;
+        }
+
         console.log('[DAW] Received op:', op.type);
         setDawState((prev) => applyOp(prev, op));
       },
@@ -328,7 +366,7 @@ export function SimpleDawView() {
                 clipId,
                 trackId,
                 assetId,
-                start: dawState.transport.positionSeconds,
+                start: localUIStateRef.current.playheadSeconds,
                 duration,
                 gain: 0.8,
                 offset: 0,
@@ -362,10 +400,7 @@ export function SimpleDawView() {
     const recordingFuncs = createRecording(
       () => {
         // Get armed tracks dynamically at the time of use from ref (always current)
-        if (!dawStateRef.current) return [];
-        return Object.entries(dawStateRef.current.tracks)
-          .filter(([_, track]) => track.type === 'audio' && track.armed)
-          .map(([id]) => id);
+        return Array.from(localUIStateRef.current.armedTrackIds);
       },
       handleRecordingComplete
     );
@@ -378,45 +413,39 @@ export function SimpleDawView() {
     dawStateRef.current = dawState;
   }, [dawState]);
 
-  // Transport controls
+  // Keep localUIState ref in sync so recording functions see current armed tracks
+  useEffect(() => {
+    localUIStateRef.current = localUIState;
+  }, [localUIState]);
+
+  // Sync playhead position from audio engine during playback
+  useEffect(() => {
+    if (!localUIState.isPlaying) return;
+
+    const interval = setInterval(() => {
+      const position = audioEngine.getPosition();
+      dispatchLocalUI({ type: 'SET_PLAYHEAD', playheadSeconds: position });
+    }, 50); // Update every 50ms for smooth playhead movement
+
+    return () => clearInterval(interval);
+  }, [localUIState.isPlaying]);
+
+  // Transport controls - now local only
   const handlePlay = useCallback(() => {
-    const op: DawOp = {
-      id: generateId(),
-      clientId,
-      timestamp: Date.now(),
-      baseVersion: dawState.version,
-      type: 'TRANSPORT_PLAY',
-      positionSeconds: dawState.transport.positionSeconds,
-      startedAtWallClock: Date.now(),
-      hostClientId: clientId,
-    };
-    dispatchOp(op);
-    audioEngine.start(dawState);
-  }, [dawState, dispatchOp, clientId]);
+    dispatchLocalUI({ type: 'SET_PLAYING', isPlaying: true });
+    audioEngine.start(dawState, localUIState.playheadSeconds);
+  }, [dawState, localUIState.playheadSeconds]);
 
   const handlePause = useCallback(() => {
     const position = audioEngine.getPosition();
-    const op: DawOp = {
-      id: generateId(),
-      clientId,
-      timestamp: Date.now(),
-      baseVersion: dawState.version,
-      type: 'TRANSPORT_PAUSE',
-      positionSeconds: position,
-    };
-    dispatchOp(op);
+    dispatchLocalUI({ type: 'SET_PLAYHEAD', playheadSeconds: position });
+    dispatchLocalUI({ type: 'SET_PLAYING', isPlaying: false });
     audioEngine.pause();
-  }, [dawState, dispatchOp, clientId]);
+  }, []);
 
   const handleStop = useCallback(() => {
-    const op: DawOp = {
-      id: generateId(),
-      clientId,
-      timestamp: Date.now(),
-      baseVersion: dawState.version,
-      type: 'TRANSPORT_STOP',
-    };
-    dispatchOp(op);
+    dispatchLocalUI({ type: 'SET_PLAYHEAD', playheadSeconds: 0 });
+    dispatchLocalUI({ type: 'SET_PLAYING', isPlaying: false });
     audioEngine.stop();
   }, [dawState, dispatchOp, clientId]);
 
@@ -429,23 +458,15 @@ export function SimpleDawView() {
       clearTimeout(seekTimeoutRef.current);
     }
 
-    // Set a new debounce timer - sends seek operation after 50ms of no new seeks
+    // Set a new debounce timer - updates local playhead position after 50ms of no new seeks
     seekTimeoutRef.current = setTimeout(() => {
       const seekPosition = pendingSeekRef.current ?? seconds;
-      const op: DawOp = {
-        id: generateId(),
-        clientId,
-        timestamp: Date.now(),
-        baseVersion: dawState.version,
-        type: 'TRANSPORT_SEEK',
-        positionSeconds: seekPosition,
-      };
-      dispatchOp(op);
+      dispatchLocalUI({ type: 'SET_PLAYHEAD', playheadSeconds: seekPosition });
       audioEngine.seek(seekPosition);
       seekTimeoutRef.current = null;
       pendingSeekRef.current = null;
     }, 50); // Debounce for 50ms - batches rapid seeks from dragging
-  }, [dawState, dispatchOp, clientId]);
+  }, []);
 
   const handleSetBpm = useCallback((bpm: number) => {
     const op: DawOp = {
@@ -515,73 +536,32 @@ export function SimpleDawView() {
     dispatchOp(op);
   }, [dawState, dispatchOp, clientId]);
 
+  // Track controls - mute/solo/arm are now local only
   const handleSetMute = useCallback((trackId: string, mute: boolean) => {
-    const op: DawOp = {
-      id: generateId(),
-      clientId,
-      timestamp: Date.now(),
-      baseVersion: dawState.version,
-      type: 'TRACK_SET_MUTE',
-      trackId,
-      mute,
-    };
-    dispatchOp(op);
-  }, [dawState, dispatchOp, clientId]);
+    dispatchLocalUI({ type: 'SET_LOCAL_MUTE', trackId, muted: mute });
+  }, []);
 
   const handleSetSolo = useCallback((trackId: string, solo: boolean) => {
-    const op: DawOp = {
-      id: generateId(),
-      clientId,
-      timestamp: Date.now(),
-      baseVersion: dawState.version,
-      type: 'TRACK_SET_SOLO',
-      trackId,
-      solo,
-    };
-    dispatchOp(op);
-  }, [dawState, dispatchOp, clientId]);
+    dispatchLocalUI({ type: 'SET_LOCAL_SOLO', trackId, soloed: solo });
+  }, []);
 
   const handleSetArm = useCallback((trackId: string, armed: boolean) => {
-    const op: DawOp = {
-      id: generateId(),
-      clientId,
-      timestamp: Date.now(),
-      baseVersion: dawState.version,
-      type: 'TRACK_SET_ARM',
-      trackId,
-      armed,
-    };
-    dispatchOp(op);
-  }, [dawState, dispatchOp, clientId]);
+    dispatchLocalUI({ type: 'SET_ARMED_TRACK', trackId, armed });
+  }, []);
 
   const handleRecord = useCallback(() => {
-    const newRecordingState = !dawState.transport.isRecording;
-    const op: DawOp = {
-      id: generateId(),
-      clientId,
-      timestamp: Date.now(),
-      baseVersion: dawState.version,
-      type: 'TRANSPORT_RECORD',
-      isRecording: newRecordingState,
-    };
-    dispatchOp(op);
+    const newRecordingState = !localUIState.isRecording;
+    dispatchLocalUI({ type: 'SET_RECORDING', isRecording: newRecordingState });
 
     if (newRecordingState) {
       // Check if we have armed audio tracks
       const armedAudioTracks = Object.entries(dawState.tracks)
-        .filter(([_, track]) => track.type === 'audio' && track.armed);
+        .filter(([trackId, track]) => track.type === 'audio' && localUIState.armedTrackIds.has(trackId));
 
       if (armedAudioTracks.length === 0) {
         alert('Please arm at least one audio track to record');
         // Disable recording if no armed tracks
-        dispatchOp({
-          id: generateId(),
-          clientId,
-          timestamp: Date.now(),
-          baseVersion: dawState.version + 1,
-          type: 'TRANSPORT_RECORD',
-          isRecording: false,
-        });
+        dispatchLocalUI({ type: 'SET_RECORDING', isRecording: false });
         return;
       }
 
@@ -603,7 +583,7 @@ export function SimpleDawView() {
         console.warn('[DAW] recordingFunctions is null! Recording not stopped.');
       }
     }
-  }, [dawState, dispatchOp, clientId, recordingFunctionsRef]);
+  }, [localUIState, dawState]);
 
   const handleReset = useCallback(() => {
     const op: DawOp = {
@@ -780,7 +760,10 @@ export function SimpleDawView() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#1a1a1a' }}>
       {/* Transport bar */}
       <TransportBar
-        transport={dawState.transport}
+        playheadSeconds={localUIState.playheadSeconds}
+        isPlaying={localUIState.isPlaying}
+        isRecording={localUIState.isRecording}
+        bpm={dawState.transport.bpm}
         onPlay={handlePlay}
         onPause={handlePause}
         onStop={handleStop}
@@ -820,6 +803,9 @@ export function SimpleDawView() {
         <TrackList
           tracks={tracks}
           selectedTrackId={uiState.selectedTrackId}
+          armedTrackIds={localUIState.armedTrackIds}
+          mutedTrackIds={localUIState.muteTrackIds}
+          soloedTrackIds={localUIState.soloTrackIds}
           onSelectTrack={(id) => setUiState({ ...uiState, selectedTrackId: id })}
           onAddTrack={handleAddTrack}
           onRemoveTrack={handleRemoveTrack}
@@ -833,6 +819,8 @@ export function SimpleDawView() {
         {/* Timeline */}
         <Timeline
           state={dawState}
+          playheadSeconds={localUIState.playheadSeconds}
+          isPlaying={localUIState.isPlaying}
           zoom={uiState.zoom}
           selectedClipId={uiState.selectedClipId}
           onSelectClip={(id, type) => setUiState({ ...uiState, selectedClipId: id, selectedClipType: type })}

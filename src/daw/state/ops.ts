@@ -38,23 +38,6 @@ export const TrackSetVolumeOpSchema = BaseOpSchema.extend({
   volume: z.number().min(0).max(1),
 });
 
-export const TrackSetMuteOpSchema = BaseOpSchema.extend({
-  type: z.literal('TRACK_SET_MUTE'),
-  trackId: z.string(),
-  mute: z.boolean(),
-});
-
-export const TrackSetSoloOpSchema = BaseOpSchema.extend({
-  type: z.literal('TRACK_SET_SOLO'),
-  trackId: z.string(),
-  solo: z.boolean(),
-});
-
-export const TrackSetArmOpSchema = BaseOpSchema.extend({
-  type: z.literal('TRACK_SET_ARM'),
-  trackId: z.string(),
-  armed: z.boolean(),
-});
 
 // Audio asset operations
 export const AudioAssetAddOpSchema = BaseOpSchema.extend({
@@ -161,38 +144,6 @@ export const TransportSetBpmOpSchema = BaseOpSchema.extend({
   bpm: z.number().min(20).max(300),
 });
 
-export const TransportPlayOpSchema = BaseOpSchema.extend({
-  type: z.literal('TRANSPORT_PLAY'),
-  positionSeconds: z.number(),
-  startedAtWallClock: z.number(),
-  hostClientId: z.string(),
-});
-
-export const TransportPauseOpSchema = BaseOpSchema.extend({
-  type: z.literal('TRANSPORT_PAUSE'),
-  positionSeconds: z.number(),
-});
-
-export const TransportStopOpSchema = BaseOpSchema.extend({
-  type: z.literal('TRANSPORT_STOP'),
-});
-
-export const TransportSeekOpSchema = BaseOpSchema.extend({
-  type: z.literal('TRANSPORT_SEEK'),
-  positionSeconds: z.number(),
-});
-
-export const TransportPositionTickOpSchema = BaseOpSchema.extend({
-  type: z.literal('TRANSPORT_POSITION_TICK'),
-  positionSeconds: z.number(),
-  hostClientId: z.string(),
-});
-
-export const TransportRecordOpSchema = BaseOpSchema.extend({
-  type: z.literal('TRANSPORT_RECORD'),
-  isRecording: z.boolean(),
-});
-
 // Project operations
 export const ProjectResetOpSchema = BaseOpSchema.extend({
   type: z.literal('PROJECT_RESET'),
@@ -204,9 +155,6 @@ export const DawOpSchema = z.discriminatedUnion('type', [
   TrackRemoveOpSchema,
   TrackRenameOpSchema,
   TrackSetVolumeOpSchema,
-  TrackSetMuteOpSchema,
-  TrackSetSoloOpSchema,
-  TrackSetArmOpSchema,
   AudioAssetAddOpSchema,
   AudioClipAddOpSchema,
   AudioClipMoveOpSchema,
@@ -221,12 +169,6 @@ export const DawOpSchema = z.discriminatedUnion('type', [
   MidiNoteResizeOpSchema,
   MidiNoteDeleteOpSchema,
   TransportSetBpmOpSchema,
-  TransportPlayOpSchema,
-  TransportPauseOpSchema,
-  TransportStopOpSchema,
-  TransportSeekOpSchema,
-  TransportPositionTickOpSchema,
-  TransportRecordOpSchema,
   ProjectResetOpSchema,
 ]);
 
@@ -235,9 +177,6 @@ export type TrackAddOp = z.infer<typeof TrackAddOpSchema>;
 export type TrackRemoveOp = z.infer<typeof TrackRemoveOpSchema>;
 export type TrackRenameOp = z.infer<typeof TrackRenameOpSchema>;
 export type TrackSetVolumeOp = z.infer<typeof TrackSetVolumeOpSchema>;
-export type TrackSetMuteOp = z.infer<typeof TrackSetMuteOpSchema>;
-export type TrackSetSoloOp = z.infer<typeof TrackSetSoloOpSchema>;
-export type TrackSetArmOp = z.infer<typeof TrackSetArmOpSchema>;
 export type AudioAssetAddOp = z.infer<typeof AudioAssetAddOpSchema>;
 export type AudioClipAddOp = z.infer<typeof AudioClipAddOpSchema>;
 export type AudioClipMoveOp = z.infer<typeof AudioClipMoveOpSchema>;
@@ -252,10 +191,4 @@ export type MidiNoteMoveOp = z.infer<typeof MidiNoteMoveOpSchema>;
 export type MidiNoteResizeOp = z.infer<typeof MidiNoteResizeOpSchema>;
 export type MidiNoteDeleteOp = z.infer<typeof MidiNoteDeleteOpSchema>;
 export type TransportSetBpmOp = z.infer<typeof TransportSetBpmOpSchema>;
-export type TransportPlayOp = z.infer<typeof TransportPlayOpSchema>;
-export type TransportPauseOp = z.infer<typeof TransportPauseOpSchema>;
-export type TransportStopOp = z.infer<typeof TransportStopOpSchema>;
-export type TransportSeekOp = z.infer<typeof TransportSeekOpSchema>;
-export type TransportPositionTickOp = z.infer<typeof TransportPositionTickOpSchema>;
-export type TransportRecordOp = z.infer<typeof TransportRecordOpSchema>;
 export type ProjectResetOp = z.infer<typeof ProjectResetOpSchema>;

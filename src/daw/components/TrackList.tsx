@@ -8,6 +8,9 @@ import type { Track } from '../types';
 interface TrackListProps {
   tracks: Track[];
   selectedTrackId: string | null;
+  armedTrackIds: Set<string>;
+  mutedTrackIds: Set<string>;
+  soloedTrackIds: Set<string>;
   onSelectTrack: (trackId: string) => void;
   onAddTrack: (type: 'audio' | 'midi') => void;
   onRemoveTrack: (trackId: string) => void;
@@ -21,6 +24,9 @@ interface TrackListProps {
 export function TrackList({
   tracks,
   selectedTrackId,
+  armedTrackIds,
+  mutedTrackIds,
+  soloedTrackIds,
   onSelectTrack,
   onAddTrack,
   onRemoveTrack,
@@ -172,17 +178,17 @@ export function TrackList({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  onSetArm(track.id, !track.armed);
+                  onSetArm(track.id, !armedTrackIds.has(track.id));
                 }}
                 style={{
                   padding: '4px 8px',
-                  background: track.armed ? '#ff4a4a' : '#555',
+                  background: armedTrackIds.has(track.id) ? '#ff4a4a' : '#555',
                   border: 'none',
                   borderRadius: '3px',
                   color: '#fff',
                   cursor: 'pointer',
                   fontSize: '11px',
-                  fontWeight: track.armed ? 'bold' : 'normal',
+                  fontWeight: armedTrackIds.has(track.id) ? 'bold' : 'normal',
                 }}
                 title="Arm track for recording"
               >
@@ -191,11 +197,11 @@ export function TrackList({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  onSetMute(track.id, !track.mute);
+                  onSetMute(track.id, !mutedTrackIds.has(track.id));
                 }}
                 style={{
                   padding: '4px 8px',
-                  background: track.mute ? '#ff9e4a' : '#555',
+                  background: mutedTrackIds.has(track.id) ? '#ff9e4a' : '#555',
                   border: 'none',
                   borderRadius: '3px',
                   color: '#fff',
@@ -208,11 +214,11 @@ export function TrackList({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  onSetSolo(track.id, !track.solo);
+                  onSetSolo(track.id, !soloedTrackIds.has(track.id));
                 }}
                 style={{
                   padding: '4px 8px',
-                  background: track.solo ? '#4aff9e' : '#555',
+                  background: soloedTrackIds.has(track.id) ? '#4aff9e' : '#555',
                   border: 'none',
                   borderRadius: '3px',
                   color: '#fff',

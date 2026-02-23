@@ -20,14 +20,14 @@ export class AudioEngine {
   /**
    * Start playback
    */
-  async start(state: DawState) {
+  async start(state: DawState, positionSeconds: number = 0) {
     await Tone.start(); // Resume audio context
     
     // Set BPM
     Tone.getTransport().bpm.value = state.transport.bpm;
     
     // Set position
-    Tone.getTransport().seconds = state.transport.positionSeconds;
+    Tone.getTransport().seconds = positionSeconds;
     
     // Schedule all clips
     this.scheduleAllClips(state);
