@@ -39,8 +39,9 @@ export function Timeline({
     type: 'audio' | 'midi' | null;
     startX: number;
     originalStart: number;
+    tempStart: number; // Current position during drag (for visual feedback)
     draggingPlayhead: boolean;
-  }>({ clipId: null, type: null, startX: 0, originalStart: 0, draggingPlayhead: false });
+  }>({ clipId: null, type: null, startX: 0, originalStart: 0, tempStart: 0, draggingPlayhead: false });
 
   const tracks = state.trackOrder.map((id) => state.tracks[id]);
   const TRACK_HEIGHT = 80;
@@ -48,7 +49,7 @@ export function Timeline({
 
   useEffect(() => {
     drawTimeline();
-  }, [state, zoom, selectedClipId, playheadSeconds, waveformDataMap]);
+  }, [state, zoom, selectedClipId, playheadSeconds, waveformDataMap, dragState]);
 
   const drawTimeline = () => {
     const canvas = canvasRef.current;
@@ -132,16 +133,18 @@ export function Timeline({
     if (track.type === 'audio') {
       Object.values(state.audioClips)
         .filter((clip) => clip.trackId === track.id)
-        .forEach((clip) => drawAudioClip(ctx, clip, y));
+        .forEach((clip) => drawAudioClip(ctx, clip, y, dragState));
     } else if (track.type === 'midi') {
       Object.values(state.midiClips)
         .filter((clip) => clip.trackId === track.id)
-        .forEach((clip) => drawMidiClip(ctx, clip, y));
+        .forEach((clip) => drawMidiClip(ctx, clip, y, dragState));
     }
   };
 
-  const drawAudioClip = (ctx: CanvasRenderingContext2D, clip: AudioClip, trackY: number) => {
-    const x = clip.start * zoom;
+  const drawAudioClip = (ctx: CanvasRenderingContext2D, clip: AudioClip, trackY: number, dragState: any) => {
+    // Use tempStart if this clip is being dragged, otherwise use the stored start position
+    const clipStart = dragState.clipId === clip.id && dragState.type === 'audio' ? dragState.tempStart : clip.start;
+    const x = clipStart * zoom;
     const w = clip.duration * zoom;
     const h = TRACK_HEIGHT - 10;
     const y = trackY + 5;
@@ -240,8 +243,10 @@ export function Timeline({
     });
   };
 
-  const drawMidiClip = (ctx: CanvasRenderingContext2D, clip: MidiClip, trackY: number) => {
-    const x = clip.start * zoom;
+  const drawMidiClip = (ctx: CanvasRenderingContext2D, clip: MidiClip, trackY: number, dragState: any) => {
+    // Use tempStart if this clip is being dragged, otherwise use the stored start position
+    const clipStart = dragState.clipId === clip.id && dragState.type === 'midi' ? dragState.tempStart : clip.start;
+    const x = clipStart * zoom;
     const w = clip.duration * zoom;
     const h = TRACK_HEIGHT - 10;
     const y = trackY + 5;
@@ -299,6 +304,7 @@ export function Timeline({
         type: null,
         startX: x,
         originalStart: playheadSeconds,
+        tempStart: playheadSeconds,
         draggingPlayhead: true,
       });
       return;
@@ -313,6 +319,7 @@ export function Timeline({
         type: null,
         startX: x,
         originalStart: playheadSeconds,
+        tempStart: playheadSeconds,
         draggingPlayhead: true,
       });
       return;
@@ -331,7 +338,7 @@ export function Timeline({
       );
       if (clip) {
         onSelectClip(clip.id, 'audio');
-        setDragState({ clipId: clip.id, type: 'audio', startX: x, originalStart: clip.start, draggingPlayhead: false });
+        setDragState({ clipId: clip.id, type: 'audio', startX: x, originalStart: clip.start, tempStart: clip.start, draggingPlayhead: false });
       }
     } else if (track.type === 'midi') {
       const clip = Object.values(state.midiClips).find(
@@ -339,7 +346,7 @@ export function Timeline({
       );
       if (clip) {
         onSelectClip(clip.id, 'midi');
-        setDragState({ clipId: clip.id, type: 'midi', startX: x, originalStart: clip.start, draggingPlayhead: false });
+        setDragState({ clipId: clip.id, type: 'midi', startX: x, originalStart: clip.start, tempStart: clip.start, draggingPlayhead: false });
       }
     }
   };
@@ -359,21 +366,111 @@ export function Timeline({
       return;
     }
 
-    // Handle clip dragging
+    // Handle clip dragging - just update tempStart for visual feedback, don't send to server yet
     if (!dragState.clipId || !dragState.type) return;
 
     const deltaTime = (x - dragState.startX) / zoom;
     const newStart = Math.max(0, dragState.originalStart + deltaTime);
 
-    if (dragState.type === 'audio') {
-      onAudioClipMove(dragState.clipId, newStart);
-    } else if (dragState.type === 'midi') {
-      onMidiClipMove(dragState.clipId, newStart);
-    }
+    // Update tempStart to show visual feedback during drag
+    // This state change will trigger the useEffect to redraw the timeline
+    setDragState({
+      ...dragState,
+      tempStart: newStart,
+    });
   };
 
   const handleMouseUp = () => {
-    setDragState({ clipId: null, type: null, startX: 0, originalStart: 0, draggingPlayhead: false });
+    // Send the final position to the server only when drag is complete
+    if (dragState.clipId && dragState.type) {
+      if (dragState.type === 'audio') {
+        onAudioClipMove(dragState.clipId, dragState.tempStart);
+      } else if (dragState.type === 'midi') {
+        onMidiClipMove(dragState.clipId, dragState.tempStart);
+      }
+    }
+
+    setDragState({ clipId: null, type: null, startX: 0, originalStart: 0, tempStart: 0, draggingPlayhead: false });
+  };
+
+  // Helper to get coordinates from mouse or touch events
+  const getCoordinatesFromEvent = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>): { x: number; y: number } | null => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+
+    const rect = canvas.getBoundingClientRect();
+    let clientX: number;
+    let clientY: number;
+
+    if ('touches' in e) {
+      // Touch event
+      if (e.touches.length === 0) return null;
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      // Mouse event
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+
+    return {
+      x: clientX - rect.left + canvas.parentElement!.scrollLeft,
+      y: clientY - rect.top + canvas.parentElement!.scrollTop,
+    };
+  };
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    const coords = getCoordinatesFromEvent(e);
+    if (!coords) return;
+    
+    // Create a synthetic mouse event-like interface
+    const syntheticEvent = { clientX: coords.x + (canvasRef.current?.getBoundingClientRect().left ?? 0), clientY: coords.y + (canvasRef.current?.getBoundingClientRect().top ?? 0) };
+    handleMouseDown(syntheticEvent as any);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    const coords = getCoordinatesFromEvent(e);
+    if (!coords) return;
+    
+    // Prevent default scrolling behavior when dragging a clip
+    if (dragState.clipId || dragState.draggingPlayhead) {
+      e.preventDefault();
+    }
+
+    const x = coords.x;
+
+    // Handle playhead dragging
+    if (dragState.draggingPlayhead) {
+      const deltaTime = (x - dragState.startX) / zoom;
+      const newPosition = Math.max(0, dragState.originalStart + deltaTime);
+      onSeek(newPosition);
+      return;
+    }
+
+    // Handle clip dragging - just update tempStart for visual feedback, don't send to server yet
+    if (!dragState.clipId || !dragState.type) return;
+
+    const deltaTime = (x - dragState.startX) / zoom;
+    const newStart = Math.max(0, dragState.originalStart + deltaTime);
+
+    // Update tempStart to show visual feedback during drag
+    setDragState({
+      ...dragState,
+      tempStart: newStart,
+    });
+  };
+
+  const handleTouchEnd = (_e: React.TouchEvent<HTMLCanvasElement>) => {
+    // Send the final position to the server only when drag is complete
+    if (dragState.clipId && dragState.type) {
+      if (dragState.type === 'audio') {
+        onAudioClipMove(dragState.clipId, dragState.tempStart);
+      } else if (dragState.type === 'midi') {
+        onMidiClipMove(dragState.clipId, dragState.tempStart);
+      }
+    }
+
+    setDragState({ clipId: null, type: null, startX: 0, originalStart: 0, tempStart: 0, draggingPlayhead: false });
   };
 
   const handleDoubleClick = (_e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -386,13 +483,16 @@ export function Timeline({
   };
 
   return (
-    <div style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
+    <div style={{ flex: 1, overflow: 'auto', position: 'relative', touchAction: 'none' }}>
       <canvas
         ref={canvasRef}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
         onDoubleClick={handleDoubleClick}
         style={{
           cursor: dragState.draggingPlayhead ? 'grabbing' : dragState.clipId ? 'grabbing' : 'default',

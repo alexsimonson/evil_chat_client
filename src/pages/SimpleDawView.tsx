@@ -38,7 +38,11 @@ export function SimpleDawView() {
   const recordingFunctionsRef = useRef<{ start: () => Promise<void>; stop: () => void } | null>(null);
   const dawStateRef = useRef<DawState | null>(null); // Keep current state for recording functions
   const localUIStateRef = useRef(localUIState); // Keep current local UI state for recording functions
-  const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null); // For debouncing seek operations during drag
+  const trackListContainerRef = useRef<HTMLDivElement>(null);
+  const timelineContainerRef = useRef<HTMLCanvasElement>(null);
+  const mainContentRef = useRef<HTMLDivElement>(null); // Main scrollable container for syncing header
+  const headerRulerRef = useRef<HTMLDivElement>(null); // Header SVG container for scroll sync
+  const seekTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // For debouncing seek operations during drag
   const pendingSeekRef = useRef<number | null>(null); // Track the latest pending seek position
 
   // Fetch shared DAW project ID
@@ -94,7 +98,7 @@ export function SimpleDawView() {
           'TRACK_SET_SOLO',
         ]);
 
-        const validOperations = operations.filter(op => !obsoleteOpTypes.has(op.type));
+        const validOperations = (operations as DawOp[]).filter(op => !obsoleteOpTypes.has(op.type));
         console.log(`[DAW] Filtered to ${validOperations.length} valid operations (skipped ${operations.length - validOperations.length} obsolete ops)`);
 
         // Replay all valid operations to build initial state
@@ -201,6 +205,8 @@ export function SimpleDawView() {
       livekitSyncRef.current = null;
     };
   }, [room, clientId]);
+
+  // Scroll sync is no longer needed - both panels are in the same scrollable container  
   
   const dispatchOp = useCallback((op: DawOp) => {
     console.log('[DAW] Dispatching operation:', op);
@@ -444,6 +450,21 @@ export function SimpleDawView() {
 
     return () => clearInterval(interval);
   }, [localUIState.isPlaying]);
+
+  // Sync header SVG scroll with main content scroll
+  useEffect(() => {
+    const mainContent = mainContentRef.current;
+    const headerRuler = headerRulerRef.current;
+    if (!mainContent || !headerRuler) return;
+
+    const handleScroll = () => {
+      // Apply horizontal scroll to the header ruler SVG container
+      headerRuler.scrollLeft = mainContent.scrollLeft;
+    };
+
+    mainContent.addEventListener('scroll', handleScroll);
+    return () => mainContent.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // Extract waveforms from audio assets
   useEffect(() => {
@@ -813,6 +834,8 @@ export function SimpleDawView() {
     );
   }
 
+  const HEADER_HEIGHT = 30;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#1a1a1a' }}>
       {/* Transport bar */}
@@ -854,10 +877,87 @@ export function SimpleDawView() {
         </span>
       </div>
 
-      {/* Main content */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      {/* Header row - spans full width with fixed left panel and scrollable right */}
+      <div style={{ display: 'flex', height: `${HEADER_HEIGHT}px`, background: '#2a2a2a', borderBottom: '1px solid #444', flexShrink: 0, zIndex: 5 }}>
+        {/* Left header - add track buttons */}
+        <div style={{ width: '250px', flexShrink: 0, display: 'flex', gap: '8px', alignItems: 'center', paddingLeft: '10px', borderRight: '1px solid #444' }}>
+          <button
+            onClick={() => handleAddTrack('audio')}
+            style={{
+              padding: '4px 10px',
+              background: '#4a9eff',
+              border: 'none',
+              borderRadius: '3px',
+              color: '#fff',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 'bold',
+            }}
+            title="Add audio track"
+          >
+            + Audio
+          </button>
+          <button
+            onClick={() => handleAddTrack('midi')}
+            style={{
+              padding: '4px 10px',
+              background: '#9e4aff',
+              border: 'none',
+              borderRadius: '3px',
+              color: '#fff',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 'bold',
+            }}
+            title="Add MIDI track"
+          >
+            + MIDI
+          </button>
+        </div>
+
+        {/* Right header - time ruler SVG (needs horizontal scroll sync) */}
+        <div ref={headerRulerRef} style={{ flex: 1, overflow: 'auto', display: 'flex', alignItems: 'center' }}>
+          <svg
+            width={Math.max(300 * uiState.zoom, 1000)}
+            height={HEADER_HEIGHT}
+            style={{ display: 'block', flexShrink: 0 }}
+            viewBox={`0 0 ${Math.max(300 * uiState.zoom, 1000)} ${HEADER_HEIGHT}`}
+            preserveAspectRatio="none"
+          >
+            {/* Ruler background */}
+            <rect x={0} y={0} width={Math.max(300 * uiState.zoom, 1000)} height={HEADER_HEIGHT} fill="#2a2a2a" />
+            
+            {/* Time markers */}
+            {Array.from({ length: 301 }, (_, i) => {
+              const x = i * uiState.zoom;
+              const isMajor = i % 5 === 0;
+              return (
+                <g key={i}>
+                  <line
+                    x1={x}
+                    y1={isMajor ? 0 : HEADER_HEIGHT - 5}
+                    x2={x}
+                    y2={HEADER_HEIGHT}
+                    stroke="#444"
+                    strokeWidth={1}
+                  />
+                  {isMajor && (
+                    <text x={x + 2} y={12} fill="#aaa" fontSize="10" fontFamily="monospace">
+                      {i}s
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      </div>
+
+      {/* Main content - track list and timeline */}
+      <div ref={mainContentRef} style={{ flex: 1, display: 'flex', overflow: 'auto', gap: 0 }}>
         {/* Track list */}
         <TrackList
+          ref={trackListContainerRef}
           tracks={tracks}
           selectedTrackId={uiState.selectedTrackId}
           armedTrackIds={localUIState.armedTrackIds}
@@ -875,9 +975,9 @@ export function SimpleDawView() {
 
         {/* Timeline */}
         <Timeline
+          ref={timelineContainerRef}
           state={dawState}
           playheadSeconds={localUIState.playheadSeconds}
-          isPlaying={localUIState.isPlaying}
           zoom={uiState.zoom}
           selectedClipId={uiState.selectedClipId}
           waveformDataMap={waveformDataMap}
