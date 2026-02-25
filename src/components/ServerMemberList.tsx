@@ -1,6 +1,12 @@
 import type { Member } from "../types";
 
-export function ServerMemberList({ members }: { members: Member[] }) {
+export function ServerMemberList({ 
+  members, 
+  onMemberClick 
+}: { 
+  members: Member[];
+  onMemberClick?: (userId: string) => void;
+}) {
   if (members.length === 0) {
     return <div style={{ fontSize: 12, color: "#666" }}>No members</div>;
   }
@@ -10,6 +16,7 @@ export function ServerMemberList({ members }: { members: Member[] }) {
       {members.map((m) => (
         <div
           key={m.id}
+          onClick={() => onMemberClick?.(m.id)}
           style={{
             display: "flex",
             alignItems: "center",
@@ -20,6 +27,16 @@ export function ServerMemberList({ members }: { members: Member[] }) {
             background: "white",
             minHeight: "32px",
             minWidth: 0,
+            cursor: onMemberClick ? "pointer" : "default",
+            transition: "background-color 0.15s",
+          }}
+          onMouseEnter={(e) => {
+            if (onMemberClick) {
+              e.currentTarget.style.backgroundColor = "#f5f5f5";
+            }
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = "white";
           }}
         >
           <span

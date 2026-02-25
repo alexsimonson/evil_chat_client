@@ -9,9 +9,11 @@ type AuthState =
 
 type AuthCtx = {
   state: AuthState;
+  user: User | null;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshMe: () => Promise<void>;
+  setUser: (user: User) => void;
 };
 
 const Ctx = createContext<AuthCtx | null>(null);
@@ -38,12 +40,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setState({ status: "anon", user: null });
   }
 
+  function setUser(user: User) {
+    setState({ status: "authed", user });
+  }
+
   useEffect(() => {
     refreshMe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const value = useMemo<AuthCtx>(() => ({ state, login, logout, refreshMe }), [state]);
+  const value = useMemo<AuthCtx>(
+    () => ({ 
+      state, 
+      user: state.status === "authed" ? state.user : null,
+      login, 
+      logout, 
+      refreshMe,
+      setUser,
+    }), 
+    [state]
+  );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

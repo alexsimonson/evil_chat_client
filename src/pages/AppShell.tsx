@@ -11,6 +11,7 @@ import { ServerMemberList } from "../components/ServerMemberList";
 import { MessageList } from "../components/MessageList";
 import { MessageComposer } from "../components/MessageComposer";
 import { VoiceParticipants } from "../components/VoiceParticipants";
+import { ProfileView } from "../components/ProfileView";
 import { useVoice } from "../voice/useVoice";
 import { useSocket } from "../websocket/useSocket";
 
@@ -38,6 +39,7 @@ export function AppShell() {
   const [createChannelType, setCreateChannelType] = useState<"text" | "voice">("text");
   const [showTextChannelList, setShowTextChannelList] = useState(true);
   const [showVoiceChannelList, setShowVoiceChannelList] = useState(true);
+  const [profileUserId, setProfileUserId] = useState<string | null>(null);
 
   const socket = useSocket(user, activeServerId);
 
@@ -90,11 +92,16 @@ export function AppShell() {
       }
 
       const { members } = await api.listServerMembers(activeServerId);
+      
+      console.log('[AppShell] Member load:', {
+        totalMembers: members.length,
+        membersData: members.map(m => ({ username: m.username, online: m.online }))
+      });
+      
+      // Use the API's online status directly - WebSocket will update it with presence:sync
       const apiOnline = new Set(members.filter((m) => m.online).map((m) => m.id));
-      const currentOnline = onlineUserIdsRef.current;
-      const mergedOnline = apiOnline.size > 0 ? apiOnline : currentOnline;
-      setOnlineUserIds(mergedOnline);
-      setMembers(members.map((m) => ({ ...m, online: mergedOnline.has(m.id) })));
+      setOnlineUserIds(apiOnline);
+      setMembers(members);
     })().catch(console.error);
   }, [activeServerId]);
 
@@ -131,6 +138,7 @@ export function AppShell() {
   // WebSocket: Listen for user online/offline status
   useEffect(() => {
     const unsubPresenceSync = socket.onPresenceSync((data) => {
+      console.log('[AppShell] Presence sync received:', data);
       const next = new Set(data.onlineUserIds.map((id) => String(id)));
       setOnlineUserIds(next);
       setMembers((prev) =>
@@ -139,6 +147,7 @@ export function AppShell() {
     });
 
     const unsubOnline = socket.onUserOnline((user) => {
+      console.log('[AppShell] User online event:', user);
       setOnlineUserIds((prev) => new Set([...prev, String(user.userId)]));
       setMembers((prev) =>
         prev.map((m) => (m.id === String(user.userId) ? { ...m, online: true } : m))
@@ -146,6 +155,7 @@ export function AppShell() {
     });
 
     const unsubOffline = socket.onUserOffline((userId) => {
+      console.log('[AppShell] User offline event:', userId);
       setOnlineUserIds((prev) => {
         const next = new Set(prev);
         next.delete(String(userId));
@@ -304,7 +314,7 @@ export function AppShell() {
 
             <h3 style={{ marginTop: "16px", marginBottom: "8px", fontSize: "0.95rem" }}>Members</h3>
             <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-              <ServerMemberList members={members} />
+              <ServerMemberList members={members} onMemberClick={(userId) => setProfileUserId(userId)} />
             </div>
 
             {socket.state.status !== "connected" && (
@@ -429,7 +439,7 @@ export function AppShell() {
                   onSelect={setActiveServerId}
                 />
                 <h3 style={{ marginTop: "24px" }}>Members</h3>
-                <ServerMemberList members={members} />
+                <ServerMemberList members={members} onMemberClick={(userId) => setProfileUserId(userId)} />
               </div>
             </div>
           )}
@@ -669,6 +679,11 @@ export function AppShell() {
         onCreateChannel={onCreateChannel}
         defaultType={createChannelType}
       />
+
+      {/* Profile View Modal */}
+      {profileUserId && (
+        <ProfileView userId={profileUserId} onClose={() => setProfileUserId(null)} />
+      )}
 
       <style>{`
         .app-shell-container {

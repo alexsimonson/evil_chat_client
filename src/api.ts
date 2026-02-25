@@ -39,10 +39,26 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
+  signup: (email: string, username: string, password: string) =>
+    apiFetch<{ user: User }>("/auth/signup", {
+      method: "POST",
+      body: JSON.stringify({ email, username, password }),
+    }),
   logout: () =>
     apiFetch<void>("/auth/logout", {
       method: "POST",
     }),
+  updateProfile: (data: { username?: string; displayName?: string; email?: string }) =>
+    apiFetch<{ user: User }>("/auth/me", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  deleteAccount: () =>
+    apiFetch<void>("/auth/me", {
+      method: "DELETE",
+    }),
+  getUserProfile: (userId: string) =>
+    apiFetch<{ user: User }>(`/auth/users/${userId}`),
 
   // Read models
   listServers: () => apiFetch<{ servers: Server[] }>("/servers"),
