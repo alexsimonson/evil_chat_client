@@ -2,7 +2,7 @@
  * Simple DAW View - directly accessible, shared project
  */
 
-import { useEffect, useState, useCallback, useRef, useReducer } from 'react';
+import { useEffect, useState, useCallback, useRef, useReducer, useImperativeHandle, forwardRef } from 'react';
 import { Room } from 'livekit-client';
 import { applyOp } from '../daw/state/store';
 import { getAudioEngine } from '../daw/audio/audioEngine';
@@ -21,7 +21,18 @@ import type { DawOp } from '../daw/state/ops';
 const generateId = () => Math.random().toString(36).substring(2, 15);
 const API_URL = import.meta.env.VITE_API_URL as string;
 
-export function SimpleDawView() {
+export type SimpleDawViewHandle = {
+  addTestMidiClip: () => void;
+};
+
+interface SimpleDawViewProps {
+  onConnectionStatusChange?: (connected: boolean) => void;
+}
+
+export const SimpleDawView = forwardRef<SimpleDawViewHandle, SimpleDawViewProps>(function SimpleDawView(
+  { onConnectionStatusChange }: SimpleDawViewProps,
+  ref
+) {
   const [dawState, setDawState] = useState<DawState>(createEmptyDawState('shared-project'));
   const [uiState, setUiState] = useState<UiState>(createDefaultUiState());
   const [localUIState, dispatchLocalUI] = useReducer(applyLocalUIAction, createInitialLocalUIState());
@@ -43,6 +54,7 @@ export function SimpleDawView() {
   const rulerDragRef = useRef({ isDragging: false, startX: 0, startScrollLeft: 0 });
   const seekTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // For debouncing seek operations during drag
   const pendingSeekRef = useRef<number | null>(null); // Track the latest pending seek position
+  const HEADER_HEIGHT = 30;
 
   // Fetch shared DAW project ID
   useEffect(() => {
@@ -797,6 +809,16 @@ export function SimpleDawView() {
   const tracks = dawState.trackOrder.map((id) => dawState.tracks[id]);
   const editingClip = uiState.editingMidiClipId ? dawState.midiClips[uiState.editingMidiClipId] : null;
 
+  useImperativeHandle(ref, () => ({
+    addTestMidiClip: handleAddTestClip,
+  }), [handleAddTestClip]);
+
+  useEffect(() => {
+    if (!onConnectionStatusChange) return;
+    const connected = Boolean(room) && !connectionError;
+    onConnectionStatusChange(connected);
+  }, [room, connectionError, onConnectionStatusChange]);
+
   // Show loading state while loading project or connecting
   if (isLoadingProject || isConnecting) {
     return (
@@ -840,8 +862,6 @@ export function SimpleDawView() {
     );
   }
 
-  const HEADER_HEIGHT = 30;
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#1a1a1a' }}>
       {/* Transport bar */}
@@ -859,36 +879,13 @@ export function SimpleDawView() {
         onReset={handleReset}
       />
 
-      {/* Helper toolbar */}
-      <div style={{ padding: '10px 20px', background: '#333', borderBottom: '1px solid #444', display: 'flex', gap: '10px', color: '#fff', alignItems: 'center' }}>
-        <button
-          onClick={handleAddTestClip}
-          style={{
-            padding: '6px 12px',
-            background: '#9e4aff',
-            border: 'none',
-            borderRadius: '4px',
-            color: '#fff',
-            cursor: 'pointer',
-            fontSize: '12px',
-          }}
-        >
-          🎹 Add Test MIDI Clip
-        </button>
-        <span style={{ fontSize: '12px', color: '#888', lineHeight: '28px' }}>
-          Tip: Add MIDI track first, then click to add test clip. Double-click clip to edit notes.
-        </span>
-        <span style={{ marginLeft: 'auto', fontSize: '11px', color: room ? '#4caf50' : '#888' }}>
-          {room ? '🟢 Connected to shared DAW' : '⚪ Disconnected'}
-        </span>
-      </div>
-
       {/* Main content - track list and right-side scrollbox */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', background: '#1a1a1a', border: '1px solid #444' }}>
         <div ref={mainContentRef} style={{ flex: 1, display: 'flex', overflowY: 'auto', overflowX: 'hidden' }}>
           {/* Track list - left panel */}
           <div style={{ width: '250px', flexShrink: 0, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 2, background: '#252525', borderRight: '1px solid #555' }}>
             <div
+              className="daw-header daw-track-header"
               style={{
                 height: `${HEADER_HEIGHT}px`,
                 background: '#2a2a2a',
@@ -904,6 +901,7 @@ export function SimpleDawView() {
             >
               <button
                 onClick={() => handleAddTrack('audio')}
+                className="daw-track-action-button"
                 style={{
                   padding: '4px 10px',
                   background: '#4a9eff',
@@ -920,6 +918,7 @@ export function SimpleDawView() {
               </button>
               <button
                 onClick={() => handleAddTrack('midi')}
+                className="daw-track-action-button"
                 style={{
                   padding: '4px 10px',
                   background: '#9e4aff',
@@ -956,6 +955,7 @@ export function SimpleDawView() {
           {/* Right side - single horizontal scrollbox */}
           <div ref={timelineScrollRef} className="timeline-scroll" style={{ flex: 1, minWidth: 0, overflowX: 'auto', overflowY: 'hidden', position: 'relative', zIndex: 1, background: '#1a1a1a' }}>
             <div
+              className="daw-header daw-ruler-header"
               style={{
                 height: `${HEADER_HEIGHT}px`,
                 background: '#2a2a2a',
@@ -1083,4 +1083,4 @@ export function SimpleDawView() {
       </div>
     </div>
   );
-}
+});

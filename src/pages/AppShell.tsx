@@ -13,13 +13,15 @@ import { MessageComposer } from "../components/MessageComposer";
 import { VoiceParticipants } from "../components/VoiceParticipants";
 import { useVoice } from "../voice/useVoice";
 import { useSocket } from "../websocket/useSocket";
-import { SimpleDawView } from "./SimpleDawView";
+import { SimpleDawView, type SimpleDawViewHandle } from "./SimpleDawView";
 
 type TabType = "servers" | "text" | "voice";
 
 export function AppShell() {
   // DAW view toggle
   const [showDaw, setShowDaw] = useState(false);
+  const [dawConnected, setDawConnected] = useState(false);
+  const dawRef = useRef<SimpleDawViewHandle | null>(null);
 
   // Call all hooks before any conditional returns
   const { state, logout } = useAuth();
@@ -259,8 +261,33 @@ export function AppShell() {
             ← Back to Chat
           </button>
           <h2 style={{ margin: 0, fontSize: '18px' }}>🎵 Collaborative DAW</h2>
+          <button
+            onClick={() => dawRef.current?.addTestMidiClip()}
+            style={{
+              padding: '6px 12px',
+              background: '#9e4aff',
+              border: 'none',
+              borderRadius: '4px',
+              color: '#fff',
+              cursor: 'pointer',
+              fontSize: '12px',
+            }}
+          >
+            🎹 Add Test MIDI Clip
+          </button>
+          <span
+            title={dawConnected ? 'Connected to shared DAW' : 'Disconnected'}
+            style={{
+              width: '10px',
+              height: '10px',
+              borderRadius: '50%',
+              background: dawConnected ? '#4caf50' : '#888',
+              display: 'inline-block',
+              marginLeft: 'auto',
+            }}
+          />
         </div>
-        <SimpleDawView />
+        <SimpleDawView ref={dawRef} onConnectionStatusChange={setDawConnected} />
       </div>
     );
   }
