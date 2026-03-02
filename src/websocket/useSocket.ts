@@ -8,7 +8,24 @@ interface SocketMessage {
   content: string;
   createdAt: string;
   user: {
-    id: number;
+    id: string;
+    username: string;
+    displayName: string | null;
+  };
+}
+
+function toNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+interface SocketDirectMessage {
+  id: number;
+  conversationId: number;
+  content: string;
+  createdAt: string;
+  user: {
+    id: string;
     username: string;
     displayName: string | null;
   };
@@ -47,6 +64,7 @@ export function useSocket(user: User | null, serverId: number | null) {
   const voiceParticipantsHandlersRef = useRef<
     Array<(data: { channelId: number; participants: VoiceParticipant[] }) => void>
   >([]);
+  const dmHandlersRef = useRef<Array<(msg: SocketDirectMessage) => void>>([]);
 
   // Connection logic
   useEffect(() => {
@@ -114,7 +132,19 @@ export function useSocket(user: User | null, serverId: number | null) {
     });
 
     // Listen for new messages
-    socket.on("message:new", (msg: SocketMessage) => {
+    socket.on("message:new", (raw: any) => {
+      const msg: SocketMessage = {
+        id: toNumber(raw?.id),
+        channelId: toNumber(raw?.channelId),
+        content: String(raw?.content ?? ""),
+        createdAt: String(raw?.createdAt ?? new Date().toISOString()),
+        user: {
+          id: String(raw?.user?.id ?? ""),
+          username: String(raw?.user?.username ?? "unknown-user"),
+          displayName: raw?.user?.displayName ?? null,
+        },
+      };
+
       console.log("[Socket] New message:", msg);
       messageHandlersRef.current.forEach((handler) => handler(msg));
     });
@@ -139,6 +169,23 @@ export function useSocket(user: User | null, serverId: number | null) {
         voiceParticipantsHandlersRef.current.forEach((handler) => handler(data));
       }
     );
+
+    socket.on("dm:new", (raw: any) => {
+      const msg: SocketDirectMessage = {
+        id: toNumber(raw?.id),
+        conversationId: toNumber(raw?.conversationId),
+        content: String(raw?.content ?? ""),
+        createdAt: String(raw?.createdAt ?? new Date().toISOString()),
+        user: {
+          id: String(raw?.user?.id ?? ""),
+          username: String(raw?.user?.username ?? "unknown-user"),
+          displayName: raw?.user?.displayName ?? null,
+        },
+      };
+
+      console.log("[Socket] New direct message:", msg);
+      dmHandlersRef.current.forEach((handler) => handler(msg));
+    });
 
     return () => {
       if (socket.connected) {
@@ -266,12 +313,44 @@ export function useSocket(user: User | null, serverId: number | null) {
     []
   );
 
+  const sendDirectMessage = useCallback(
+    async (conversationId: number, content: string): Promise<number> => {
+      if (!socketRef.current?.connected) {
+        throw new Error("Socket not connected");
+      }
+
+      return new Promise((resolve, reject) => {
+        socketRef.current!.emit(
+          "dm:send",
+          { conversationId, content },
+          (response: any) => {
+            if (response?.error) {
+              reject(new Error(response.error));
+            } else {
+              resolve(response.messageId);
+            }
+          }
+        );
+      });
+    },
+    []
+  );
+
+  const onDirectMessage = useCallback((handler: (msg: SocketDirectMessage) => void) => {
+    dmHandlersRef.current = [...dmHandlersRef.current, handler];
+    return () => {
+      dmHandlersRef.current = dmHandlersRef.current.filter((h) => h !== handler);
+    };
+  }, []);
+
   return {
     state,
     sendMessage,
+    sendDirectMessage,
     joinVoiceChannel,
     leaveVoiceChannel,
     onMessage,
+    onDirectMessage,
     onUserOnline,
     onUserOffline,
     onPresenceSync,

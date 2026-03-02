@@ -33,7 +33,8 @@ export type Channel = {
 
 export type Message = {
   id: number;
-  channelId: number;
+  channelId: number | null;
+  conversationId?: number | null;
   content: string;
   createdAt: string;
   editedAt: string | null;
@@ -42,4 +43,17 @@ export type Message = {
     username: string;
     displayName: string | null;
   };
+};
+
+export type DirectMessageConversation = {
+  id: number;
+  createdAt: string;
+  updatedAt: string;
+  otherUser: {
+    id: string;
+    username: string;
+    displayName: string | null;
+  };
+  lastMessagePreview: string | null;
+  lastMessageAt: string | null;
 };

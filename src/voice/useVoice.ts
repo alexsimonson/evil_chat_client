@@ -165,7 +165,7 @@ export function useVoice() {
         });
       });
 
-      room.on("trackUnsubscribed", (track, publication) => {
+      room.on("trackUnsubscribed", (track) => {
         removeVideoTrack(track);
       });
 

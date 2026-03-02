@@ -2,13 +2,15 @@ import { useState, useEffect } from "react";
 import { api } from "../api";
 import { useAuth } from "../auth/AuthProvider";
 import type { User } from "../types";
+import { DMButton } from "./DMButton";
 
 type ProfileViewProps = {
   userId: string;
   onClose: () => void;
+  onMessageClick?: (userId: string) => void;
 };
 
-export function ProfileView({ userId, onClose }: ProfileViewProps) {
+export function ProfileView({ userId, onClose, onMessageClick }: ProfileViewProps) {
   const { user: currentUser, setUser } = useAuth();
   const [profile, setProfile] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -175,6 +177,21 @@ export function ProfileView({ userId, onClose }: ProfileViewProps) {
                   </label>
                   <div style={{ fontSize: "0.85rem", fontFamily: "monospace", color: "#666" }}>{profile.id}</div>
                 </div>
+
+                {!isOwnProfile && onMessageClick && (
+                  <div style={{ marginTop: "8px" }}>
+                    <DMButton
+                      onClick={() => onMessageClick(profile.id)}
+                      label="DM Send Direct Message"
+                      style={{
+                        width: "100%",
+                        padding: "12px",
+                        fontSize: "1rem",
+                        minHeight: "44px",
+                      }}
+                    />
+                  </div>
+                )}
 
                 {isOwnProfile && (
                   <div style={{ marginTop: "8px" }}>

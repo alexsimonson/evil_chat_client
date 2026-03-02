@@ -7,7 +7,7 @@ export function MessageList({
   bottomPadding,
 }: {
   messages: Message[];
-  scrollRef?: RefObject<HTMLDivElement>;
+  scrollRef?: RefObject<HTMLDivElement | null>;
   bottomPadding?: number;
 }) {
   return (

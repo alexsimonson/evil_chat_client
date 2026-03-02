@@ -1,11 +1,16 @@
 import type { Member } from "../types";
+import { DMButton } from "./DMButton";
 
 export function ServerMemberList({ 
   members, 
-  onMemberClick 
+  onMemberClick,
+  onMessageClick,
+  currentUserId,
 }: { 
   members: Member[];
   onMemberClick?: (userId: string) => void;
+  onMessageClick?: (userId: string) => void;
+  currentUserId?: string;
 }) {
   if (members.length === 0) {
     return <div style={{ fontSize: 12, color: "#666" }}>No members</div>;
@@ -55,10 +60,19 @@ export function ServerMemberList({
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
             minWidth: 0,
+            flex: 1,
           }}
           title={m.displayName ?? m.username}>
             {m.displayName ?? m.username}
           </span>
+          {onMessageClick && m.id !== currentUserId && (
+            <DMButton
+              onClick={(e) => {
+                e.stopPropagation();
+                onMessageClick(m.id);
+              }}
+            />
+          )}
         </div>
       ))}
     </div>

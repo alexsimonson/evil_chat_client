@@ -1,4 +1,11 @@
-import type { User, Server, Channel, Message, Member } from "./types";
+import type {
+  User,
+  Server,
+  Channel,
+  Message,
+  Member,
+  DirectMessageConversation,
+} from "./types";
 
 const API_URL = import.meta.env.VITE_API_URL as string;
 
@@ -71,6 +78,20 @@ export const api = {
     if (before) qs.set("before", String(before));
     return apiFetch<{ messages: Message[]; nextCursor: number | null }>(
       `/channels/${channelId}/messages?${qs.toString()}`
+    );
+  },
+  listDmConversations: () =>
+    apiFetch<{ conversations: DirectMessageConversation[] }>("/dms/conversations"),
+  createDmConversation: (recipientUserId: string) =>
+    apiFetch<{ conversation: DirectMessageConversation }>("/dms/conversations", {
+      method: "POST",
+      body: JSON.stringify({ recipientUserId }),
+    }),
+  listDmMessages: (conversationId: number, limit = 50, before?: number) => {
+    const qs = new URLSearchParams({ limit: String(limit) });
+    if (before) qs.set("before", String(before));
+    return apiFetch<{ messages: Message[]; nextCursor: number | null }>(
+      `/dms/conversations/${conversationId}/messages?${qs.toString()}`
     );
   },
 

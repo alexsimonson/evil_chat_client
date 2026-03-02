@@ -20,7 +20,7 @@ export function LoginPage() {
         await login(email, password);
       } else {
         // Signup
-        const { user } = await api.signup(email, username, password);
+        await api.signup(email, username, password);
         // After signup, log them in automatically
         await login(email, password);
       }

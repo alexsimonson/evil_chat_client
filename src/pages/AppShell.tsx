@@ -1,10 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { useAuth } from "../auth/AuthProvider";
-import type { Server, Channel, Message, Member } from "../types";
+import type {
+  Server,
+  Channel,
+  Message,
+  Member,
+  DirectMessageConversation,
+} from "../types";
 import type { VoiceChannelInfo } from "../voice/useVoiceParticipants";
 import { ServerList } from "../components/ServerList";
 import { ChannelList } from "../components/ChannelList";
+import { DirectMessageList } from "../components/DirectMessageList";
 import { ChannelCreateDialog } from "../components/ChannelCreateDialog";
 import { VoiceChannelList } from "../components/VoiceChannelList";
 import { ServerMemberList } from "../components/ServerMemberList";
@@ -15,7 +22,8 @@ import { ProfileView } from "../components/ProfileView";
 import { useVoice } from "../voice/useVoice";
 import { useSocket } from "../websocket/useSocket";
 
-type TabType = "servers" | "text" | "voice";
+type TabType = "servers" | "text" | "dms" | "voice";
+type ChatKind = "channel" | "dm";
 
 export function AppShell() {
   const { state, logout } = useAuth();
@@ -24,20 +32,25 @@ export function AppShell() {
   const [servers, setServers] = useState<Server[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [dmConversations, setDmConversations] = useState<DirectMessageConversation[]>([]);
   const [voiceChannels, setVoiceChannels] = useState<VoiceChannelInfo[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(new Set());
-  const onlineUserIdsRef = useRef<Set<string>>(new Set());
+  const [, setOnlineUserIds] = useState<Set<string>>(new Set());
   const messageListRef = useRef<HTMLDivElement | null>(null);
+  const messagesRef = useRef<Message[]>([]);
+  const dmConversationsRef = useRef<DirectMessageConversation[]>([]);
 
   const voice = useVoice();
 
   const [activeServerId, setActiveServerId] = useState<number | null>(null);
   const [activeChannelId, setActiveChannelId] = useState<number | null>(null);
+  const [activeDmConversationId, setActiveDmConversationId] = useState<number | null>(null);
+  const [activeChatKind, setActiveChatKind] = useState<ChatKind>("channel");
   const [activeTab, setActiveTab] = useState<TabType>("text");
   const [showCreateChannelDialog, setShowCreateChannelDialog] = useState(false);
   const [createChannelType, setCreateChannelType] = useState<"text" | "voice">("text");
   const [showTextChannelList, setShowTextChannelList] = useState(true);
+  const [showDmList, setShowDmList] = useState(true);
   const [showVoiceChannelList, setShowVoiceChannelList] = useState(true);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
 
@@ -47,10 +60,96 @@ export function AppShell() {
     () => channels.find((c) => c.id === activeChannelId) ?? null,
     [channels, activeChannelId]
   );
+  const activeDmConversation = useMemo(
+    () => dmConversations.find((c) => c.id === activeDmConversationId) ?? null,
+    [dmConversations, activeDmConversationId]
+  );
+
+  function normalizeConversation(
+    conversation: DirectMessageConversation
+  ): DirectMessageConversation {
+    return {
+      ...conversation,
+      id: Number(conversation.id),
+    };
+  }
+
+  function normalizeMessage(message: Message): Message {
+    return {
+      ...message,
+      id: Number(message.id),
+      channelId: message.channelId === null ? null : Number(message.channelId),
+      conversationId:
+        message.conversationId === null || message.conversationId === undefined
+          ? message.conversationId
+          : Number(message.conversationId),
+    };
+  }
+
+  function sortConversations(list: DirectMessageConversation[]) {
+    return list
+      .slice()
+      .sort((a, b) => {
+        const aTime = Date.parse(a.lastMessageAt ?? a.updatedAt);
+        const bTime = Date.parse(b.lastMessageAt ?? b.updatedAt);
+        return bTime - aTime;
+      });
+  }
+
+  function upsertConversation(conversation: DirectMessageConversation) {
+    setDmConversations((prev) => {
+      const filtered = prev.filter((item) => item.id !== conversation.id);
+      return sortConversations([conversation, ...filtered]);
+    });
+  }
+
+  function patchConversationFromMessage(
+    conversationId: number,
+    content: string,
+    createdAt: string
+  ) {
+    setDmConversations((prev) => {
+      const next = prev.map((conversation) =>
+        conversation.id === conversationId
+          ? {
+              ...conversation,
+              lastMessagePreview: content,
+              lastMessageAt: createdAt,
+              updatedAt: createdAt,
+            }
+          : conversation
+      );
+      return sortConversations(next);
+    });
+  }
 
   useEffect(() => {
-    onlineUserIdsRef.current = onlineUserIds;
-  }, [onlineUserIds]);
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    dmConversationsRef.current = dmConversations;
+  }, [dmConversations]);
+
+  async function refreshDmConversations() {
+    try {
+      const { conversations } = await api.listDmConversations();
+      setDmConversations(sortConversations(conversations.map(normalizeConversation)));
+    } catch (e) {
+      console.warn("DM conversations unavailable:", e);
+      setDmConversations([]);
+    }
+  }
+
+  useEffect(() => {
+    if (!user) return;
+
+    const interval = setInterval(() => {
+      refreshDmConversations().catch(console.error);
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [user]);
 
   // Load servers on mount
   useEffect(() => {
@@ -59,6 +158,7 @@ export function AppShell() {
       setServers(servers);
       const first = servers[0]?.id ?? null;
       setActiveServerId(first);
+      await refreshDmConversations();
     })().catch(console.error);
   }, []);
 
@@ -69,7 +169,9 @@ export function AppShell() {
       const { channels } = await api.listChannels(activeServerId);
       setChannels(channels);
       // Don't auto-select a channel; let user select from main screen
-      setActiveChannelId(null);
+      if (activeChatKind !== "dm") {
+        setActiveChannelId(null);
+      }
       setShowTextChannelList(true);
       setShowVoiceChannelList(true);
 
@@ -79,7 +181,7 @@ export function AppShell() {
         voiceChans.map((c) => ({
           id: c.id,
           name: c.name,
-          livekitRoomName: c.livekitRoomName,
+          livekitRoomName: c.livekitRoomName ?? null,
           participants: [],
         }))
       );
@@ -103,14 +205,78 @@ export function AppShell() {
       setOnlineUserIds(apiOnline);
       setMembers(members);
     })().catch(console.error);
-  }, [activeServerId]);
+  }, [activeServerId, activeChatKind]);
 
   // Load initial messages
-  async function loadMessages(channelId: number) {
-    const { messages } = await api.listMessages(channelId, 50);
-    // API returns newest-first (desc). Reverse for display.
-    setMessages(messages.slice().reverse());
-  }
+  const loadChannelMessages = useCallback(async (channelId: number) => {
+    const response = await api.listMessages(channelId, 50);
+    const next = response.messages.slice().reverse().map(normalizeMessage);
+    messagesRef.current = next;
+    setMessages(next);
+  }, []);
+
+  const loadDmMessages = useCallback(async (conversationId: number) => {
+    const response = await api.listDmMessages(conversationId, 50);
+    const next = response.messages.slice().reverse().map(normalizeMessage);
+    messagesRef.current = next;
+    setMessages(next);
+  }, []);
+
+  const mergeIncomingOpenDmMessage = useCallback(
+    (msg: {
+      id: number;
+      conversationId: number;
+      content: string;
+      createdAt: string;
+      user: { id: string; username: string; displayName: string | null };
+    }) => {
+      if (activeChatKind !== "dm" || msg.conversationId !== activeDmConversationId) {
+        return;
+      }
+
+      const current = messagesRef.current;
+      if (current.some((m) => Number(m.id) === Number(msg.id))) {
+        return;
+      }
+
+      const incoming: Message = {
+        id: msg.id,
+        channelId: null,
+        conversationId: msg.conversationId,
+        content: msg.content,
+        createdAt: msg.createdAt,
+        editedAt: null,
+        user: msg.user,
+      };
+
+      if (current.length === 0) {
+        const next = [incoming];
+        messagesRef.current = next;
+        setMessages(next);
+        return;
+      }
+
+      const firstId = current[0].id;
+      const lastId = current[current.length - 1].id;
+
+      if (Number(msg.id) > Number(lastId)) {
+        const next = [...current, incoming];
+        messagesRef.current = next;
+        setMessages(next);
+        return;
+      }
+
+      if (Number(msg.id) < Number(firstId)) {
+        const next = [incoming, ...current];
+        messagesRef.current = next;
+        setMessages(next);
+        return;
+      }
+
+      loadDmMessages(msg.conversationId).catch(console.error);
+    },
+    [activeChatKind, activeDmConversationId, loadDmMessages]
+  );
 
   function scrollToLatest() {
     const el = messageListRef.current;
@@ -119,21 +285,52 @@ export function AppShell() {
   }
 
   useEffect(() => {
-    if (!activeChannelId) return;
-    loadMessages(activeChannelId).catch(console.error);
-  }, [activeChannelId]);
+    if (activeChatKind === "channel") {
+      if (!activeChannelId) {
+        messagesRef.current = [];
+        setMessages([]);
+        return;
+      }
+      loadChannelMessages(activeChannelId).catch(console.error);
+      return;
+    }
+
+    if (!activeDmConversationId) {
+      messagesRef.current = [];
+      setMessages([]);
+      return;
+    }
+    loadDmMessages(activeDmConversationId).catch(console.error);
+  }, [activeChannelId, activeDmConversationId, activeChatKind, loadChannelMessages, loadDmMessages]);
 
   // WebSocket: Listen for new messages
   useEffect(() => {
     const unsubscribe = socket.onMessage((msg) => {
       // Only add to current channel
-      if (msg.channelId === activeChannelId) {
-        setMessages((prev) => [...prev, msg as any]);
+      if (activeChatKind === "channel" && Number(msg.channelId) === Number(activeChannelId)) {
+        setMessages((prev) => [...prev, normalizeMessage(msg as any)]);
       }
     });
 
     return unsubscribe;
-  }, [socket, activeChannelId]);
+  }, [socket, activeChannelId, activeChatKind]);
+
+  useEffect(() => {
+    const unsubscribe = socket.onDirectMessage((msg) => {
+      patchConversationFromMessage(msg.conversationId, msg.content, msg.createdAt);
+
+      const knownConversation = dmConversationsRef.current.some(
+        (conversation) => conversation.id === msg.conversationId
+      );
+      if (!knownConversation) {
+        refreshDmConversations().catch(console.error);
+      }
+
+      mergeIncomingOpenDmMessage(msg);
+    });
+
+    return unsubscribe;
+  }, [socket, mergeIncomingOpenDmMessage]);
 
   // WebSocket: Listen for user online/offline status
   useEffect(() => {
@@ -193,13 +390,48 @@ export function AppShell() {
   }, [socket]);
 
   async function onSend(content: string) {
-    if (!activeChannelId || socket.state.status !== "connected") return;
+    if (socket.state.status !== "connected") return;
 
     try {
-      await socket.sendMessage(activeChannelId, content);
-      // Message will arrive via WebSocket event
+      if (activeChatKind === "channel") {
+        if (!activeChannelId) return;
+        await socket.sendMessage(activeChannelId, content);
+        return;
+      }
+
+      if (!activeDmConversationId) return;
+      await socket.sendDirectMessage(activeDmConversationId, content);
     } catch (e) {
       console.error("Failed to send message:", e);
+    }
+  }
+
+  function selectChannel(channelId: number, tab?: TabType) {
+    setActiveChatKind("channel");
+    setActiveDmConversationId(null);
+    setActiveChannelId(channelId);
+    if (tab) setActiveTab(tab);
+  }
+
+  function selectDmConversation(conversationId: number) {
+    setActiveChatKind("dm");
+    setActiveChannelId(null);
+    setActiveDmConversationId(conversationId);
+    setActiveTab("dms");
+    setShowDmList(false);
+  }
+
+  async function startDmWithUser(userId: string) {
+    if (!user || userId === user.id) return;
+
+    try {
+      const { conversation } = await api.createDmConversation(userId);
+      const normalized = normalizeConversation(conversation);
+      upsertConversation(normalized);
+      selectDmConversation(normalized.id);
+    } catch (e) {
+      console.error("Failed to start DM:", e);
+      await refreshDmConversations();
     }
   }
 
@@ -241,12 +473,10 @@ export function AppShell() {
       const { channels: updated } = await api.listChannels(activeServerId);
       setChannels(updated);
       // Auto-select the new channel and show it
-      setActiveChannelId(channel.id);
+      selectChannel(channel.id, type === "text" ? "text" : "voice");
       if (type === "text") {
-        setActiveTab("text");
         setShowTextChannelList(false);
       } else {
-        setActiveTab("voice");
         setShowVoiceChannelList(false);
       }
     } catch (e) {
@@ -314,7 +544,12 @@ export function AppShell() {
 
             <h3 style={{ marginTop: "16px", marginBottom: "8px", fontSize: "0.95rem" }}>Members</h3>
             <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-              <ServerMemberList members={members} onMemberClick={(userId) => setProfileUserId(userId)} />
+              <ServerMemberList
+                members={members}
+                onMemberClick={(memberUserId) => setProfileUserId(memberUserId)}
+                onMessageClick={(memberUserId) => startDmWithUser(memberUserId)}
+                currentUserId={user?.id}
+              />
             </div>
 
             {socket.state.status !== "connected" && (
@@ -333,6 +568,17 @@ export function AppShell() {
             flexDirection: "column",
             minWidth: 0,
           }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+              <h3 style={{ marginTop: 0, marginBottom: 0, fontSize: "0.95rem" }}>Direct Messages</h3>
+            </div>
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", marginBottom: "12px" }}>
+              <DirectMessageList
+                conversations={dmConversations}
+                activeConversationId={activeChatKind === "dm" ? activeDmConversationId : null}
+                onSelect={selectDmConversation}
+              />
+            </div>
+
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
               <h3 style={{ marginTop: 0, marginBottom: 0, fontSize: "0.95rem" }}>Channels</h3>
               <button
@@ -357,8 +603,8 @@ export function AppShell() {
             <div style={{ flex: 1, minHeight: 0, overflowY: "auto", marginBottom: "12px" }}>
               <ChannelList
                 channels={channels.filter((c) => c.type === "text")}
-                activeChannelId={activeChannelId}
-                onSelect={setActiveChannelId}
+                activeChannelId={activeChatKind === "channel" ? activeChannelId : null}
+                onSelect={(channelId) => selectChannel(channelId, "text")}
               />
             </div>
 
@@ -386,26 +632,42 @@ export function AppShell() {
             <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
               <VoiceChannelList
                 channels={voiceChannels}
-                activeChannelId={activeChannelId}
-                onSelect={setActiveChannelId}
+                activeChannelId={activeChatKind === "channel" ? activeChannelId : null}
+                onSelect={(channelId) => selectChannel(channelId, "voice")}
               />
             </div>
           </div>
 
           {/* Main Content Area */}
           <div style={{ display: "grid", gridTemplateRows: "1fr auto", minWidth: 0, overflow: "hidden" }}>
-            {activeChannel?.type === "text" ? (
+            {activeChatKind === "dm" && activeDmConversation ? (
               <>
-                <MessageList messages={messages} />
+                <MessageList messages={messages} scrollRef={messageListRef} />
                 <MessageComposer onSend={onSend} />
               </>
-            ) : (
+            ) : activeChannel?.type === "text" ? (
+              <>
+                <MessageList messages={messages} scrollRef={messageListRef} />
+                <MessageComposer onSend={onSend} />
+              </>
+            ) : activeChannel?.type === "voice" ? (
               <VoiceParticipants
                 activeChannel={activeChannel}
                 voice={voice}
                 onJoinVoice={onJoinVoice}
                 onLeaveVoice={onLeaveVoice}
               />
+            ) : (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  opacity: 0.6,
+                }}
+              >
+                Select a channel or direct message
+              </div>
             )}
           </div>
         </div>
@@ -439,7 +701,12 @@ export function AppShell() {
                   onSelect={setActiveServerId}
                 />
                 <h3 style={{ marginTop: "24px" }}>Members</h3>
-                <ServerMemberList members={members} onMemberClick={(userId) => setProfileUserId(userId)} />
+                <ServerMemberList
+                  members={members}
+                  onMemberClick={(memberUserId) => setProfileUserId(memberUserId)}
+                  onMessageClick={(memberUserId) => startDmWithUser(memberUserId)}
+                  currentUserId={user?.id}
+                />
               </div>
             </div>
           )}
@@ -522,13 +789,91 @@ export function AppShell() {
                     ) : (
                       <ChannelList
                         channels={channels.filter((c) => c.type === "text")}
-                        activeChannelId={activeChannelId}
-                        onSelect={(id) => {
-                          setActiveChannelId(id);
+                        activeChannelId={activeChatKind === "channel" ? activeChannelId : null}
+                        onSelect={(channelId) => {
+                          selectChannel(channelId, "text");
                           setShowTextChannelList(false);
                         }}
                       />
                     )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* DM Tab - Conversations + Messages */}
+          {activeTab === "dms" && (
+            <div style={{ display: "grid", gridTemplateRows: showDmList ? "1fr" : "auto 1fr", height: "100%", minHeight: 0, width: "100%" }}>
+              {!showDmList && activeDmConversation && (
+                <div style={{
+                  padding: "8px 12px",
+                  borderBottom: "1px solid #ddd",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  fontSize: "0.9rem",
+                  fontWeight: 600,
+                  flexShrink: 0,
+                }}>
+                  <button
+                    onClick={() => setShowDmList(true)}
+                    style={{
+                      padding: "4px 8px",
+                      fontSize: "0.85rem",
+                      flexShrink: 0,
+                    }}
+                    title="Back to conversations"
+                  >
+                    ←
+                  </button>
+                  <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                    💬 {activeDmConversation.otherUser.displayName ?? activeDmConversation.otherUser.username}
+                  </div>
+                </div>
+              )}
+              {!showDmList && activeDmConversation ? (
+                <>
+                  <MessageList
+                    messages={messages}
+                    scrollRef={messageListRef}
+                    bottomPadding={128}
+                  />
+                  <div className="mobile-message-composer">
+                    <MessageComposer onSend={onSend} />
+                  </div>
+                  <button
+                    onClick={scrollToLatest}
+                    style={{
+                      position: "fixed",
+                      right: 12,
+                      bottom: 124,
+                      zIndex: 1002,
+                      padding: "8px 10px",
+                      borderRadius: "999px",
+                      border: "1px solid #ddd",
+                      background: "white",
+                      boxShadow: "0 2px 8px rgba(0, 0, 0, 0.12)",
+                      fontSize: "0.95rem",
+                    }}
+                    title="Jump to latest"
+                  >
+                    ↓
+                  </button>
+                </>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", opacity: 0.6, gap: "16px", padding: "20px" }}>
+                  <div>Select a conversation to start chatting</div>
+                  <div style={{ fontSize: "0.85rem", maxHeight: "calc(100% - 120px)", overflow: "auto", width: "100%", paddingTop: "12px", borderTop: "1px solid #ddd" }}>
+                    <h4 style={{ marginTop: 0 }}>Direct Messages</h4>
+                    <DirectMessageList
+                      conversations={dmConversations}
+                      activeConversationId={activeChatKind === "dm" ? activeDmConversationId : null}
+                      onSelect={(conversationId) => {
+                        selectDmConversation(conversationId);
+                        setShowDmList(false);
+                      }}
+                    />
                   </div>
                 </div>
               )}
@@ -591,9 +936,9 @@ export function AppShell() {
                     ) : (
                       <VoiceChannelList
                         channels={voiceChannels}
-                        activeChannelId={activeChannelId}
-                        onSelect={(id) => {
-                          setActiveChannelId(id);
+                        activeChannelId={activeChatKind === "channel" ? activeChannelId : null}
+                        onSelect={(channelId) => {
+                          selectChannel(channelId, "voice");
                           setShowVoiceChannelList(false);
                         }}
                       />
@@ -609,7 +954,7 @@ export function AppShell() {
       {/* Tab Navigation Bar - Mobile Only */}
       <div className="app-shell-nav" style={{
         display: "none",
-        gridTemplateColumns: "repeat(3, 1fr)",
+        gridTemplateColumns: "repeat(4, 1fr)",
         borderTop: "1px solid #ddd",
         backgroundColor: "white",
         gap: 0,
@@ -654,6 +999,24 @@ export function AppShell() {
           💬 Chat
         </button>
         <button
+          onClick={() => setActiveTab("dms")}
+          className={activeTab === "dms" ? "tab-active" : ""}
+          style={{
+            flex: 1,
+            padding: "12px",
+            border: "none",
+            background: activeTab === "dms" ? "#646cff" : "transparent",
+            color: activeTab === "dms" ? "white" : "inherit",
+            borderTop: activeTab === "dms" ? "3px solid #646cff" : "1px solid #ddd",
+            cursor: "pointer",
+            fontSize: "0.85rem",
+            minHeight: "52px",
+            borderRadius: 0,
+          }}
+        >
+          ✉️ DMs
+        </button>
+        <button
           onClick={() => setActiveTab("voice")}
           className={activeTab === "voice" ? "tab-active" : ""}
           style={{
@@ -682,7 +1045,14 @@ export function AppShell() {
 
       {/* Profile View Modal */}
       {profileUserId && (
-        <ProfileView userId={profileUserId} onClose={() => setProfileUserId(null)} />
+        <ProfileView
+          userId={profileUserId}
+          onClose={() => setProfileUserId(null)}
+          onMessageClick={(memberUserId) => {
+            startDmWithUser(memberUserId).catch(console.error);
+            setProfileUserId(null);
+          }}
+        />
       )}
 
       <style>{`
@@ -725,7 +1095,7 @@ export function AppShell() {
           left: 0;
           right: 0;
           display: none;
-          grid-template-columns: repeat(3, 1fr) !important;
+          grid-template-columns: repeat(4, 1fr) !important;
           border-top: 1px solid #ddd;
           background: white;
           gap: 0 !important;
